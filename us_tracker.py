@@ -26,7 +26,7 @@ def process_file(country, state, file_path):
         accumulator = [0] * len(dates)
         for line in reader:
             if line[1] == country:
-                if state and country == 'US' and line[0] != state:
+                if state and country == 'US' and not line[0].endswith(state):
                     continue
                 counts = line[4:]
                 for n in range(len(dates)):
@@ -48,13 +48,13 @@ def main():
     state = args.state
 
     confirmed_dates, confirmed_new_cases, confirmed_cases = \
-        process_file(country, state, 'time_series_19-covid-Confirmed.csv')
+        process_file(country, state, 'time_series_covid19_confirmed_global.csv')
 
     deaths_dates, new_deaths, cumulative_deaths = \
-        process_file(country, state, 'time_series_19-covid-Deaths.csv')
+        process_file(country, state, 'time_series_covid19_deaths_global.csv')
 
     recovered_dates, new_recovered, cumulative_recovered = \
-        process_file(country, state, 'time_series_19-covid-Recovered.csv')
+        process_file(country, state, 'time_series_covid19_recovered_global.csv')
 
     if (confirmed_dates[-1] != deaths_dates[-1] or
             confirmed_dates[-1] != recovered_dates[-1]):
