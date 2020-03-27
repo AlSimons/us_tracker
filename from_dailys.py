@@ -46,17 +46,20 @@ def process_file(path, file, level, focus):
         reader = csv.DictReader(f)
         fields = reader.fieldnames
         found = False
-        for field in fields:
-            if level in field:
-                level = field
-                found = True
-                break
-        if not found:
-            return {'Day': file,
-                    'Confirmed': 0,
-                    'Deaths': 0,
-                    'Recovered': 0,
-                    'Active': 0}
+        if level is not None:
+            # If we're not filtering (getting Global stats), don't need
+            # to do this.
+            for field in fields:
+                if level in field:
+                    level = field
+                    found = True
+                    break
+            if not found:
+                return {'Day': file,
+                        'Confirmed': 0,
+                        'Deaths': 0,
+                        'Recovered': 0,
+                        'Active': 0}
         confirmed = 0
         deaths = 0
         recovered = 0
