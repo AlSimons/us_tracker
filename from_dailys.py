@@ -103,7 +103,6 @@ def compute_trajectory(days):
         five_days.append(days[n]['Acceleration'])
         five_days = five_days[-5:]
         days[n]['Smooth Acceleration'] = statistics.mean(five_days)
-        print(five_days, statistics.mean(five_days))
 
 
 def write_header(focus, o):
