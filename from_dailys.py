@@ -5,8 +5,7 @@ import argparse
 import csv
 import os
 import re
-import sys
-
+import statistics
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -91,11 +90,26 @@ def process_file(path, file, level, focus):
             'Recovered': recovered,
             'Active': active}
 
+def compute_trajectory(days):
+    days[0]['Velocity'] = 0
+    days[0]['Acceleration'] = 0
+    for n in range(1, len(days)):
+        days[n]['Velocity'] = days[n]['Confirmed'] - days[n-1]['Confirmed']
+        days[n]['Acceleration'] = days[n]['Velocity'] - days[n-1]['Velocity']
+
+    # Now the smoothed acceleration, to remove some of the jitter.
+    five_days = []
+    for n in range(len(days)):
+        five_days.append(days[n]['Acceleration'])
+        five_days = five_days[-5:]
+        days[n]['Smooth Acceleration'] = statistics.mean(five_days)
+        print(five_days, statistics.mean(five_days))
+
 
 def write_header(focus, o):
-    print('{}\tConfirmed\tDeaths\t\tRecovered\t\tActive\t'.format(focus),
+    print('{}\tConfirmed\tConfirmed\tConfirmed\tConfirmed\tDeaths\t\tRecovered\t\tActive\t'.format(focus),
           file=o)
-    print('Date\tNumber\tNumber\tPercent\tNumber\tPercent\tNumber\tPercent',
+    print('Date\tNumber\tVelocity\tAcceleration\tSmooth Acc\tNumber\tPercent\tNumber\tPercent\tNumber\tPercent',
           file=o)
 
 
@@ -104,6 +118,9 @@ def write_it(focus, days):
         write_header(focus, o)
         for day in days:
             conf = day['Confirmed']
+            velocity = day['Velocity']
+            acceleration = day['Acceleration']
+            smooth_acceleration = round(day['Smooth Acceleration'], 0)
             deaths = day['Deaths']
             recovered = day['Recovered']
             active = day['Active']
@@ -115,9 +132,12 @@ def write_it(focus, days):
                 deaths_pct = ''
                 recovered_pct = ''
                 active_pct = ''
-            print('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(
-                day['Day'],
+            print('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(
+                day['Day'][:-4],
                 conf,
+                velocity,
+                acceleration,
+                smooth_acceleration,
                 deaths,
                 deaths_pct,
                 recovered,
@@ -152,6 +172,8 @@ def main():
     days = []
     for f in all_daily_files:
         days.append(process_file(from_dir, f, level, focus))
+
+    compute_trajectory(days)
 
     write_it(focus, days)
 
