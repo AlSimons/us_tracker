@@ -155,7 +155,7 @@ def get_files(from_dir):
     for f in all_files:
         if re.match(r'\d{2}-\d{2}-\d{4}\.csv', f):
             filtered.append(f)
-    return sorted(filtered)
+    return sorted(filtered)[-22:]
 
 
 def process_file(path, file, level, focus):
@@ -255,30 +255,31 @@ def plot_it(focus, columns):
     conf_num = []
     conf_accel = []
     deaths = []
-    for day in Day.all_days:
+    for day in Day.all_days[1:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
         conf_vel.append(day.conf_vel)
         conf_accel.append(day.conf_sm_acc)
         deaths.append(day.deaths_num)
     dates = [x[:-5] for x in dates]
-    fig = plt.figure(figsize=(18, 12))
-    plt.subplot(711)
+    fig = plt.figure(figsize=(10, 9))
+    plt.subplots_adjust(hspace=.3)
+    plt.subplot(221)
     plt.title(focus + " Confirmed Cases")
     plt.xticks(rotation=90)
     plt.plot(dates, conf_num, 'g-')
-    plt.subplot(713)
-    plt.title(focus + " Daily New Cases")
-    plt.xticks(rotation=90)
-    plt.plot(dates, conf_vel,  'k-')
-    plt.subplot(715)
-    plt.title(focus + " New Case Delta")
-    plt.xticks(rotation=90)
-    plt.plot(dates, conf_accel,  'm-')
-    plt.subplot(717)
+    plt.subplot(223)
     plt.title(focus + " Deaths")
     plt.xticks(rotation=90)
     plt.plot(dates, deaths,  'r-')
+    plt.subplot(222)
+    plt.title(focus + " Daily New Cases")
+    plt.xticks(rotation=90)
+    plt.plot(dates, conf_vel,  'k-')
+    plt.subplot(224)
+    plt.title(focus + " New Case Delta")
+    plt.xticks(rotation=90)
+    plt.plot(dates, conf_accel,  'm-')
     plt.show()
 
 
