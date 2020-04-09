@@ -249,37 +249,38 @@ def write_it(focus, columns):
             print(day, file=o)
 
 
+def one_plot(dates, values, focus, position, title, color):
+    plt.subplot(position)
+    plt.title(focus + " " + title)
+    plt.xticks(rotation=90)
+    plt.plot(dates, values, color + '-')
+
+
 def plot_it(focus, columns):
     dates = []
     conf_vel = []
     conf_num = []
     conf_accel = []
     deaths = []
+    deaths_vel = []
+    deaths_acc = []
     for day in Day.all_days[1:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
         conf_vel.append(day.conf_vel)
         conf_accel.append(day.conf_sm_acc)
         deaths.append(day.deaths_num)
+        deaths_vel.append(day.deaths_vel)
+        deaths_acc.append(day.deaths_acc)
     dates = [x[:-5] for x in dates]
-    fig = plt.figure(figsize=(10, 9))
+    fig = plt.figure(figsize=(15, 9))
     plt.subplots_adjust(hspace=.3)
-    plt.subplot(221)
-    plt.title(focus + " Confirmed Cases")
-    plt.xticks(rotation=90)
-    plt.plot(dates, conf_num, 'g-')
-    plt.subplot(223)
-    plt.title(focus + " Deaths")
-    plt.xticks(rotation=90)
-    plt.plot(dates, deaths,  'r-')
-    plt.subplot(222)
-    plt.title(focus + " Daily New Cases")
-    plt.xticks(rotation=90)
-    plt.plot(dates, conf_vel,  'k-')
-    plt.subplot(224)
-    plt.title(focus + " New Case Delta")
-    plt.xticks(rotation=90)
-    plt.plot(dates, conf_accel,  'm-')
+    one_plot(dates, conf_num, focus, 231, "Confirmed Cases", 'g')
+    one_plot(dates, conf_vel, focus, 232, "Daily New Cases", 'y')
+    one_plot(dates, conf_accel, focus, 233, "New Case Delta (10 day mean)", 'k')
+    one_plot(dates, deaths, focus, 234, "Deaths", 'r')
+    one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths", 'b')
+    one_plot(dates, deaths_acc, focus, 236, "New Death Delta (10 day mean)", 'k')
     plt.show()
 
 
