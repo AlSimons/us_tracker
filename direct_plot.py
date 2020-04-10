@@ -8,6 +8,9 @@ import os
 import re
 import statistics
 
+SMOOTH_DAYS = 20
+DISPLAY_DAYS = 28
+
 
 class ColumnInfo:
     def __init__(self, header1, header2, field,
@@ -100,7 +103,6 @@ class Day:
 
     @staticmethod
     def compute_smoothed_acceleration():
-        smooth_days = 10
         for column in Day.columns:
             if column.computed_type == 'sm_acc':
                 Day.past_accelerations = []
@@ -111,10 +113,8 @@ class Day:
                         acc = 0
                     Day.past_accelerations.append(
                         acc)
-                    Day.past_accelerations = \
-                        Day.past_accelerations[-smooth_days:]
                     setattr(day, column.field,
-                            round(statistics.mean(Day.past_accelerations), 0))
+                            round(statistics.mean(Day.past_accelerations[-SMOOTH_DAYS:]), 0))
 
     def __str__(self):
         out = '{}\t'.format(self.date)
@@ -155,7 +155,9 @@ def get_files(from_dir):
     for f in all_files:
         if re.match(r'\d{2}-\d{2}-\d{4}\.csv', f):
             filtered.append(f)
-    return sorted(filtered)[-22:]
+    # The limiting expression below makes sure that if the data are available
+    # we can do the smoothing of acceleration for even the first displayed day.
+    return sorted(filtered)[-(SMOOTH_DAYS + DISPLAY_DAYS):]
 
 
 def process_file(path, file, level, focus):
@@ -256,7 +258,7 @@ def one_plot(dates, values, focus, position, title, color):
     plt.plot(dates, values, color + '-')
 
 
-def plot_it(focus, columns):
+def plot_it(focus):
     dates = []
     conf_vel = []
     conf_num = []
@@ -264,7 +266,7 @@ def plot_it(focus, columns):
     deaths = []
     deaths_vel = []
     deaths_acc = []
-    for day in Day.all_days[1:]:
+    for day in Day.all_days[-DISPLAY_DAYS:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
         conf_vel.append(day.conf_vel)
@@ -273,14 +275,16 @@ def plot_it(focus, columns):
         deaths_vel.append(day.deaths_vel)
         deaths_acc.append(day.deaths_acc)
     dates = [x[:-5] for x in dates]
-    fig = plt.figure(figsize=(15, 9))
+    plt.figure(figsize=(15, 9))
     plt.subplots_adjust(hspace=.3)
     one_plot(dates, conf_num, focus, 231, "Confirmed Cases", 'g')
     one_plot(dates, conf_vel, focus, 232, "Daily New Cases", 'y')
-    one_plot(dates, conf_accel, focus, 233, "New Case Delta (10 day mean)", 'k')
-    one_plot(dates, deaths, focus, 234, "Deaths", 'r')
+    one_plot(dates, conf_accel, focus, 233, "New Case Delta ({} day mean)".format(
+        min(len(dates), SMOOTH_DAYS)), 'k')
+    one_plot(dates, deaths, focus, 234, "Deaths Cumulative", 'r')
     one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths", 'b')
-    one_plot(dates, deaths_acc, focus, 236, "New Death Delta (10 day mean)", 'k')
+    one_plot(dates, deaths_acc, focus, 236, "New Death Delta ({} day mean)".format(
+        min(len(dates), SMOOTH_DAYS)), 'k')
     plt.show()
 
 
@@ -321,7 +325,7 @@ def main():
     Day.compute_pcts_velocities_accelerations()
     Day.compute_smoothed_acceleration()
 
-    plot_it(focus, columns)
+    plot_it(focus)
     write_it(focus, columns)
 
 
