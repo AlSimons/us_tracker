@@ -113,9 +113,9 @@ class Day:
                         acc = 0
                     Day.past_accelerations.append(
                         acc)
+
                     setattr(day, column.field,
                             round(statistics.mean(Day.past_accelerations[-SMOOTH_DAYS:]), 0))
-
     def __str__(self):
         out = '{}\t'.format(self.date)
         for column in Day.columns:
