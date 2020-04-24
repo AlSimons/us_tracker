@@ -115,7 +115,7 @@ class Day:
                         acc)
 
                     setattr(day, column.field,
-                            round(statistics.mean(Day.past_accelerations[-SMOOTH_DAYS:]), 0))
+                            round(statistics.mean(Day.past_accelerations[-SMOOTH_DAYS:]), 2))
     def __str__(self):
         out = '{}\t'.format(self.date)
         for column in Day.columns:
@@ -273,7 +273,7 @@ def plot_it(focus):
         conf_accel.append(day.conf_sm_acc)
         deaths.append(day.deaths_num)
         deaths_vel.append(day.deaths_vel)
-        deaths_acc.append(day.deaths_acc)
+        deaths_acc.append(day.deaths_sm_acc)
     dates = [x[:-5] for x in dates]
     plt.figure(figsize=(15, 9))
     plt.subplots_adjust(hspace=.3)

@@ -24,10 +24,11 @@ def parse_args():
 
 def read_file(filename, column):
     """
-    Extracts the four data from every reporting jurisdiction for a day.
+    Extracts the specified column's data from every reporting jurisdiction for a day. Note that each
+    jurisdiction in the file has a unique combined key; this is used later to combine data from multiple files.
     :param filename: Name of a daily file, not the full file path.
     :param column: Which column to process
-    :return: A nested dict: [combined_key: {'Confirmed':, 'Deaths':, 'Recovered':, 'Active'}, }
+    :return: A dict: {combined_key: column-datum,}
     """
     file_path = os.path.join(BASE_PATH, filename)
 
@@ -47,11 +48,11 @@ def main():
     for k in day1.keys():
         try:
             diff = day2[k] - day1[k]
-            if diff > args.threshold:
-                print(k, diff)
+            if diff > args.threshold or diff < -args.threshold:
+                print(k, diff, day1[k], day2[k])
         except KeyError:
-            # A jurisdiction didn't exist in day2.  Ignore it.
-            pass
+            # A jurisdiction didn't exist in day2.  Report it and move on.
+            print("Couldn't find combined key {} in {}.".format(k, args.day2))
 
 
 if __name__ == '__main__':
