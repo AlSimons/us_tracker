@@ -8,8 +8,8 @@ import os
 import re
 import statistics
 
-SMOOTH_DAYS = 20
-DISPLAY_DAYS = 28
+SMOOTH_DAYS = 14
+DISPLAY_DAYS = 90
 
 
 class ColumnInfo:
@@ -115,7 +115,9 @@ class Day:
                         acc)
 
                     setattr(day, column.field,
-                            round(statistics.mean(Day.past_accelerations[-SMOOTH_DAYS:]), 2))
+                            round(statistics.mean(
+                                Day.past_accelerations[-SMOOTH_DAYS:]), 2))
+
     def __str__(self):
         out = '{}\t'.format(self.date)
         for column in Day.columns:
@@ -134,10 +136,6 @@ def parse_args():
         '-3', '--admin3',
         help="Specify admin-3 level group (e.g., city / county)")
     args = parser.parse_args()
-    if (args.admin1 and args.admin2) or \
-            (args.admin1 and args.admin3) or \
-            (args.admin2 and args.admin3):
-        parser.error("Only one of --admin1, --admin2, or --admin3 may be used")
     return args
 
 
@@ -160,28 +158,41 @@ def get_files(from_dir):
     return sorted(filtered)[-(SMOOTH_DAYS + DISPLAY_DAYS):]
 
 
-def process_file(path, file, level, focus):
+def process_file(path, file, focuses, worldwide):
     date = file[:-4]
     with open(os.path.join(path, file)) as f:
         reader = csv.DictReader(f)
         fields = reader.fieldnames
-        found = False
-        if level is not None:
+        if not worldwide:
             # If we're not filtering (getting Global stats), don't need
             # to do this.
-            for field in fields:
-                if level in field:
-                    level = field
-                    found = True
-                    break
-            if not found:
-                return
+
+            # The column headers in the daily report files are not completely
+            # uniform, but close enough that we can figure out which ones to
+            # use.  Initially, levels is ['Country', 'State', 'Admin2']. We
+            # fix it here.
+            levels = ['Country', 'State', 'Admin2']
+            for n in range(len(levels)):
+                found = False
+                for field in fields:
+                    if levels[n] in field:
+                        levels[n] = field
+                        found = True
+                        break
+                if not found:
+                    # Need to find everything specified
+                    return
 
         for line in reader:
             # Filter, if we're filtering
-            if level and line[level] != focus:
-                continue
-            Day.add_line(date, line)
+            need_line = True
+            if not worldwide:
+                for n in range(len(levels)):
+                    if focuses[n] is not None and line[levels[n]] != focuses[n]:
+                        need_line = False
+                        break
+            if need_line:
+                Day.add_line(date, line)
 
 
 def define_columns():
@@ -192,8 +203,10 @@ def define_columns():
                    'vel', 'conf_num',),
         ColumnInfo("Confirmed", "Acceleration", 'conf_acc',
                    'acc', 'conf_vel',),
+        # NOTE: Originally this "Smoothed Accel" depended on conf_acc.
+        # Changed it to change the chart to show average new cases.
         ColumnInfo("Confirmed", "Smoothed Accel", 'conf_sm_acc',
-                   'sm_acc', 'conf_acc',),
+                   'sm_acc', 'conf_vel',),
 
         ColumnInfo("Deaths", "Number", 'deaths_num',
                    '', '', '', 'Deaths',),
@@ -203,8 +216,10 @@ def define_columns():
                    'vel', 'deaths_num',),
         ColumnInfo("Deaths", "Acceleration", 'deaths_acc',
                    'acc', 'deaths_vel',),
+        # NOTE: Originally this "Smoothed Accel" depended on deaths_acc.
+        # Changed it to change the chart to show average daily deaths.
         ColumnInfo("Deaths", "Smoothed Accel", 'deaths_sm_acc',
-                   'sm_acc', 'deaths_acc',),
+                   'sm_acc', 'deaths_vel',),
 
         ColumnInfo("Recovered", "Number", 'recovered_num',
                    '', '', '', 'Recovered'),
@@ -277,36 +292,39 @@ def plot_it(focus):
     dates = [x[:-5] for x in dates]
     plt.figure(figsize=(15, 9))
     plt.subplots_adjust(hspace=.3)
-    one_plot(dates, conf_num, focus, 231, "Confirmed Cases", 'g')
-    one_plot(dates, conf_vel, focus, 232, "Daily New Cases", 'y')
-    one_plot(dates, conf_accel, focus, 233, "New Case Delta ({} day mean)".format(
-        min(len(dates), SMOOTH_DAYS)), 'k')
-    one_plot(dates, deaths, focus, 234, "Deaths Cumulative", 'r')
-    one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths", 'b')
-    one_plot(dates, deaths_acc, focus, 236, "New Death Delta ({} day mean)".format(
-        min(len(dates), SMOOTH_DAYS)), 'k')
+    one_plot(dates, conf_num, focus, 231, "Confirmed Cases ({} days)".
+             format(len(dates)), 'g')
+    one_plot(dates, conf_vel, focus, 232, "Daily New Cases ({} days)".
+             format(len(dates)), 'y')
+    one_plot(dates, conf_accel, focus, 233,
+             "Average Daily New Cases ({} day mean)".
+             format(min(len(dates), SMOOTH_DAYS)), 'k')
+    one_plot(dates, deaths, focus, 234, "Deaths Cumulative ({} days)".
+             format(len(dates)), 'r')
+    one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths ({} days)".
+             format(len(dates)), 'b')
+    one_plot(dates, deaths_acc, focus, 236,
+             "Average Daily Deaths ({} day mean)".
+             format(min(len(dates), SMOOTH_DAYS)), 'k')
     plt.show()
 
 
 def get_level_focus(args):
-    focus = 'Global'
-    level = None
+    focuses = [None, None, None]
+    worldwide = True
     if args.admin1:
         # Summarize a country
-        level = 'Country'
-        focus = args.admin1
-    elif args.admin2:
+        focuses[0] = args.admin1
+        worldwide = False
+    if args.admin2:
         # Summarize a state / province
-        level = 'State'
-        focus = args.admin2
-    elif args.admin3:
+        focuses[1] = args.admin2
+        worldwide = False
+    if args.admin3:
         # Summarize a city / county
-        level = 'Admin2'
-        focus = args.admin3
-    else:
-        # Summarize global situation
-        pass
-    return level, focus
+        focuses[2] = args.admin3
+        worldwide = False
+    return worldwide, focuses
 
 
 def main():
@@ -317,14 +335,20 @@ def main():
     from_dir = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
     all_daily_files = get_files(from_dir)
 
-    level, focus = get_level_focus(args)
+    worldwide, focuses = get_level_focus(args)
 
     for f in all_daily_files:
-        process_file(from_dir, f, level, focus)
+        process_file(from_dir, f, focuses, worldwide)
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_smoothed_acceleration()
 
+    focus = 'Global'
+    for n in range(2, -1, -1):
+        if focuses[n] is not None:
+            focus = focuses[n]
+            break
+    # Use the finest grain focus that was specified
     plot_it(focus)
     write_it(focus, columns)
 
