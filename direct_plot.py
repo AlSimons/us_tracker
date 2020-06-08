@@ -290,7 +290,7 @@ def plot_it(focus):
         deaths_vel.append(day.deaths_vel)
         deaths_acc.append(day.deaths_sm_acc)
     dates = [x[:-5] for x in dates]
-    plt.figure(figsize=(15, 9))
+    plt.figure(figsize=(15, 9), num='{} COVID-19 History'.format(focus))
     plt.subplots_adjust(hspace=.3)
     one_plot(dates, conf_num, focus, 231, "Confirmed Cases ({} days)".
              format(len(dates)), 'g')
@@ -299,8 +299,8 @@ def plot_it(focus):
     one_plot(dates, conf_accel, focus, 233,
              "Average Daily New Cases ({} day mean)".
              format(min(len(dates), SMOOTH_DAYS)), 'k')
-    one_plot(dates, deaths, focus, 234, "Deaths Cumulative ({} days)".
-             format(len(dates)), 'r')
+    one_plot(dates, deaths, focus, 234, "Deaths Cumulative ({} days): {}%".
+             format(len(dates), round((deaths[-1]/conf_num[-1]) * 100, 1)), 'r')
     one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths ({} days)".
              format(len(dates)), 'b')
     one_plot(dates, deaths_acc, focus, 236,
