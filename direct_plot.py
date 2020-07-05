@@ -7,10 +7,22 @@ import matplotlib.pyplot as plt
 import os
 import re
 import statistics
+import sys
 
-SMOOTH_DAYS = 14
-DISPLAY_DAYS = 90
+# Number of days to include in the X days rolling average plots
+ROLLING_AVERAGE_DAYS = 7
 
+# Max days to display in the plots
+DISPLAY_DAYS = 120
+
+# Compare current death count to confirmed cases X days ago to compute death
+# rate percentage, since death usually lags diagnosis. Most important for areas
+# with rapidly increasing case loads, which would otherwise show an artificially
+# low death rate.
+DEATHS_LAG = 10
+
+DATA_DIRECTORY = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
+POPULATION_FILE = r'us_tracker\populations.csv'
 
 class ColumnInfo:
     def __init__(self, header1, header2, field,
@@ -49,8 +61,11 @@ class Day:
                     line_dict[column.input_column]:
                 prev = getattr(day, column.field)
                 try:
+                    # For some strange reason, JHU are recording some statistics
+                    # as floats with "nnn.0" Therefore have to do int(float())
+                    # instead of simply int(). Sigh.
                     setattr(day, column.field,
-                            int(line_dict[column.input_column]) + prev)
+                            int(float(line_dict[column.input_column])) + prev)
                 except Exception as e:
                     print("Failed for field {}: {}\n    Line was: {}".format(
                         column.input_column, e, line_dict))
@@ -116,7 +131,7 @@ class Day:
 
                     setattr(day, column.field,
                             round(statistics.mean(
-                                Day.past_accelerations[-SMOOTH_DAYS:]), 2))
+                                Day.past_accelerations[-ROLLING_AVERAGE_DAYS:]), 2))
 
     def __str__(self):
         out = '{}\t'.format(self.date)
@@ -136,6 +151,10 @@ def parse_args():
         '-3', '--admin3',
         help="Specify admin-3 level group (e.g., city / county)")
     args = parser.parse_args()
+    parser.add_argument('--parent-1',
+                        help="Country to use for percentage computation")
+    parser.add_argument('--parent-2',
+                        help="State to use for percentage computation")
     return args
 
 
@@ -155,7 +174,18 @@ def get_files(from_dir):
             filtered.append(f)
     # The limiting expression below makes sure that if the data are available
     # we can do the smoothing of acceleration for even the first displayed day.
-    return sorted(filtered)[-(SMOOTH_DAYS + DISPLAY_DAYS):]
+    return sorted(filtered)[-(ROLLING_AVERAGE_DAYS + DISPLAY_DAYS):]
+
+
+def get_population(focus):
+    with open(POPULATION_FILE) as f:
+        for line in f:
+            parts = line.strip().split(',')
+            if parts[0] == focus:
+                return int(parts[1])
+    # Use zero as the "no data" flag, since no entity will have a population
+    # of zero
+    return 0
 
 
 def process_file(path, file, focuses, worldwide):
@@ -184,6 +214,9 @@ def process_file(path, file, focuses, worldwide):
                     return
 
         for line in reader:
+            # First, gather the collective / parent information.  We're only
+            # collecting case data.
+
             # Filter, if we're filtering
             need_line = True
             if not worldwide:
@@ -290,22 +323,44 @@ def plot_it(focus):
         deaths_vel.append(day.deaths_vel)
         deaths_acc.append(day.deaths_sm_acc)
     dates = [x[:-5] for x in dates]
-    plt.figure(figsize=(15, 9), num='{} COVID-19 History'.format(focus))
-    plt.subplots_adjust(hspace=.3)
-    one_plot(dates, conf_num, focus, 231, "Confirmed Cases ({} days)".
-             format(len(dates)), 'g')
-    one_plot(dates, conf_vel, focus, 232, "Daily New Cases ({} days)".
-             format(len(dates)), 'y')
+
+    focus_population = get_population(focus)
+
+    plt.figure(figsize=(15, 9), num='{} COVID-19 History ({} days)'.
+               format(focus, len(dates)))
+    plt.subplots_adjust(hspace=.27, wspace=.16,
+                        top=.97, bottom=.07,
+                        left=.06, right=.97)
+
+    if focus_population > 0:
+        confirmed_percentage = " {}%".\
+            format(round(100 * conf_num[-1] / focus_population, 2))
+    else:
+        confirmed_percentage = ""
+
+    one_plot(dates, conf_num, focus, 231, "{:,} Confirmed Cases {}".
+             format(conf_num[-1], confirmed_percentage), 'g')
+    one_plot(dates, conf_vel, focus, 232, "{:,} Daily New Cases +{}%".
+             format(conf_vel[-1], round(100 * conf_vel[-1] / conf_num[-2], 2)),
+             'y')
     one_plot(dates, conf_accel, focus, 233,
-             "Average Daily New Cases ({} day mean)".
-             format(min(len(dates), SMOOTH_DAYS)), 'k')
-    one_plot(dates, deaths, focus, 234, "Deaths Cumulative ({} days): {}%".
-             format(len(dates), round((deaths[-1]/conf_num[-1]) * 100, 1)), 'r')
-    one_plot(dates, deaths_vel, focus, 235, "Daily New Deaths ({} days)".
-             format(len(dates)), 'b')
+             "{} Day Rolling Average Daily New Cases".
+             format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
+    try:
+        one_plot(dates, deaths, focus, 234, "{:,} Deaths Cumulative: {}%".
+                 format(deaths[-1],
+                        round((deaths[-1] /
+                               conf_num[-(DEATHS_LAG + 1)]) * 100, 1)),
+                 'r')
+    except IndexError:
+        print("No data found for {}".format(focus))
+        sys.exit()
+    one_plot(dates, deaths_vel, focus, 235, "{:,} Daily New Deaths +{}%".
+             format(deaths_vel[-1],
+                    round(100 * deaths_vel[-1] / deaths[-2], 2)), 'b')
     one_plot(dates, deaths_acc, focus, 236,
-             "Average Daily Deaths ({} day mean)".
-             format(min(len(dates), SMOOTH_DAYS)), 'k')
+             "{} Day Rolling Average Daily Deaths".
+             format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
     plt.show()
 
 
@@ -327,18 +382,31 @@ def get_level_focus(args):
     return worldwide, focuses
 
 
+def get_parent_level_focus(args):
+    parents = [None, None]
+    parent_worldwide = True
+    if args.parent_1:
+        # Summarize a country
+        parents[0] = args.parent_1
+        parent_worldwide = False
+    if args.parent_2:
+        # Summarize a state / province
+        parents[1] = args.parent_2
+        parent_worldwide = False
+    return parent_worldwide, parents
+
+
 def main():
     args = parse_args()
     columns = define_columns()
     Day.set_columns(columns)
 
-    from_dir = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
-    all_daily_files = get_files(from_dir)
+    all_daily_files = get_files(DATA_DIRECTORY)
 
     worldwide, focuses = get_level_focus(args)
 
     for f in all_daily_files:
-        process_file(from_dir, f, focuses, worldwide)
+        process_file(DATA_DIRECTORY, f, focuses, worldwide)
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_smoothed_acceleration()
