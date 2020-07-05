@@ -24,12 +24,11 @@ DEATHS_LAG = 10
 DATA_DIRECTORY = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
+
 class ColumnInfo:
-    def __init__(self, header1, header2, field,
+    def __init__(self, field,
                  computed_type, depended_field,
                  depended_field2='', input_column='',):
-        self.header1 = header1
-        self.header2 = header2
         self.field = field
         self.computed_type = computed_type
         self.depended_field = depended_field
@@ -117,17 +116,16 @@ class Day:
             today.compute_vel_acc(yesterday, 'acc')
 
     @staticmethod
-    def compute_smoothed_acceleration():
+    def compute_rolling_average():
         for column in Day.columns:
-            if column.computed_type == 'sm_acc':
+            if column.computed_type == 'rolling_average':
                 Day.past_accelerations = []
                 for day in Day.all_days:
                     try:
-                        acc = getattr(day, column.depended_field)
+                        avg = getattr(day, column.depended_field)
                     except AttributeError:
-                        acc = 0
-                    Day.past_accelerations.append(
-                        acc)
+                        avg = 0
+                    Day.past_accelerations.append(avg)
 
                     setattr(day, column.field,
                             round(statistics.mean(
@@ -230,73 +228,14 @@ def process_file(path, file, focuses, worldwide):
 
 def define_columns():
     columns_defs = [
-        ColumnInfo("Confirmed", "Number", 'conf_num',
-                   '', '', '', 'Confirmed'),
-        ColumnInfo("Confirmed", "Velocity", 'conf_vel',
-                   'vel', 'conf_num',),
-        ColumnInfo("Confirmed", "Acceleration", 'conf_acc',
-                   'acc', 'conf_vel',),
-        # NOTE: Originally this "Smoothed Accel" depended on conf_acc.
-        # Changed it to change the chart to show average new cases.
-        ColumnInfo("Confirmed", "Smoothed Accel", 'conf_sm_acc',
-                   'sm_acc', 'conf_vel',),
-
-        ColumnInfo("Deaths", "Number", 'deaths_num',
-                   '', '', '', 'Deaths',),
-        ColumnInfo("Deaths", "Percent", 'deaths_pct',
-                   'pct', 'deaths_num', 'conf_num',),
-        ColumnInfo("Deaths", "Velocity", 'deaths_vel',
-                   'vel', 'deaths_num',),
-        ColumnInfo("Deaths", "Acceleration", 'deaths_acc',
-                   'acc', 'deaths_vel',),
-        # NOTE: Originally this "Smoothed Accel" depended on deaths_acc.
-        # Changed it to change the chart to show average daily deaths.
-        ColumnInfo("Deaths", "Smoothed Accel", 'deaths_sm_acc',
-                   'sm_acc', 'deaths_vel',),
-
-        ColumnInfo("Recovered", "Number", 'recovered_num',
-                   '', '', '', 'Recovered'),
-        ColumnInfo("Recovered", "Percent", 'recovered_pct',
-                   'pct', 'recovered_num', 'conf_num',),
-        ColumnInfo("Recovered", "Velocity", 'recovered_vel',
-                   'vel', 'recovered_num',),
-        ColumnInfo("Recovered", "Acceleration", 'recovered_acc',
-                   'acc', 'recovered_vel',),
-        ColumnInfo("Recovered", "Smoothed Accel", 'recovered_sm_acc',
-                   'sm_acc', 'recovered_acc'),
-
-        ColumnInfo("Active", "Number", 'active_num',
-                   '', '', '', 'Active'),
-        ColumnInfo("Active", "Percent", 'active_pct',
-                   'pct', 'active_num', 'conf_num',),
-        ColumnInfo("Active", "Velocity", 'active_vel',
-                   'vel', 'active_num',),
-        ColumnInfo("Active", "Acceleration", 'active_acc',
-                   'acc', 'active_vel',),
-        ColumnInfo("Active", "Smoothed Accel", 'active_sm_acc',
-                   'sm_acc', 'active_acc',),
+        ColumnInfo('conf_num', '', '', '', 'Confirmed'),
+        ColumnInfo('daily_conf', 'vel', 'conf_num',),
+        ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf',),
+        ColumnInfo('deaths_num', '', '', '', 'Deaths',),
+        ColumnInfo('daily_deaths', 'vel', 'deaths_num',),
+        ColumnInfo('avg_daily_deaths', 'rolling_average', 'daily_deaths',),
     ]
     return columns_defs
-
-
-def write_header(focus, column_defs, o):
-    line1 = "{}\t" + "\t".join(x.header1 for x in column_defs)
-    line2 = "Date\t" + "\t".join(x.header2 for x in column_defs)
-    print(line1.format(focus),
-          file=o)
-    print(line2, file=o)
-
-
-def write_it(focus, columns):
-    found_one = False
-    with open('output.txt', 'w') as o:
-        write_header(focus, columns, o)
-        for day in Day.all_days:
-            conf = day.conf_num
-            if conf == 0 and not found_one:
-                continue
-            found_one = True
-            print(day, file=o)
 
 
 def one_plot(dates, values, focus, position, title, color):
@@ -317,11 +256,11 @@ def plot_it(focus):
     for day in Day.all_days[-DISPLAY_DAYS:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
-        conf_vel.append(day.conf_vel)
-        conf_accel.append(day.conf_sm_acc)
+        conf_vel.append(day.daily_conf)
+        conf_accel.append(day.avg_daily_conf)
         deaths.append(day.deaths_num)
-        deaths_vel.append(day.deaths_vel)
-        deaths_acc.append(day.deaths_sm_acc)
+        deaths_vel.append(day.daily_deaths)
+        deaths_acc.append(day.avg_daily_deaths)
     dates = [x[:-5] for x in dates]
 
     focus_population = get_population(focus)
@@ -409,7 +348,7 @@ def main():
         process_file(DATA_DIRECTORY, f, focuses, worldwide)
 
     Day.compute_pcts_velocities_accelerations()
-    Day.compute_smoothed_acceleration()
+    Day.compute_rolling_average()
 
     focus = 'Global'
     for n in range(2, -1, -1):
@@ -418,7 +357,6 @@ def main():
             break
     # Use the finest grain focus that was specified
     plot_it(focus)
-    write_it(focus, columns)
 
 
 if __name__ == '__main__':
