@@ -48,26 +48,56 @@ class Day:
         Day.day_hash[date] = self
         for column in Day.columns:
             setattr(self, column.field, 0)
+        # Handle the parent stats somewhat differently. Since we're making
+        # multiple uses of some file columns, it got too complex to try to
+        # tie it together with the main usage.
+        self.parent_conf_num = 0
+        self.parent_deaths_num = 0
 
     @staticmethod
-    def add_line(date, line_dict):
+    def add_line(date, line_dict, criteria):
         if date not in Day.day_hash.keys():
             Day(date)
         day = Day.day_hash[date]
-        for column in Day.columns:
-            if column.input_column and \
-                    column.input_column in line_dict.keys() and \
-                    line_dict[column.input_column]:
-                prev = getattr(day, column.field)
-                try:
-                    # For some strange reason, JHU are recording some statistics
-                    # as floats with "nnn.0" Therefore have to do int(float())
-                    # instead of simply int(). Sigh.
-                    setattr(day, column.field,
-                            int(float(line_dict[column.input_column])) + prev)
-                except Exception as e:
-                    print("Failed for field {}: {}\n    Line was: {}".format(
-                        column.input_column, e, line_dict))
+
+        # First, gather the collective / parent information.  Don't need to do
+        # this if parent info was not requested.
+        if criteria['parent_focus'] is not None:
+            need_line = True
+            # Don't need to filter, if we're looking for global parent stats
+            if not criteria['parent_focus'] == 'Global':
+                if line_dict[criteria['parent_level']] != \
+                        criteria['parent_focus']:
+                    need_line = False
+            if need_line:
+                day.parent_conf_num += int(line_dict['Confirmed'])
+                day.parent_deaths_num += int(line_dict['Deaths'])
+
+        # Filter, if we're filtering
+        need_line = True
+        if not criteria['worldwide']:
+            for n in range(len(criteria['levels'])):
+                if criteria['focuses'][n] is not None and \
+                        line_dict[criteria['levels'][n]] != \
+                        criteria['focuses'][n]:
+                    need_line = False
+                    break
+        if need_line:
+            for column in Day.columns:
+                if column.input_column and \
+                        column.input_column in line_dict.keys() and \
+                        line_dict[column.input_column]:
+                    prev = getattr(day, column.field)
+                    try:
+                        # For some strange reason, JHU are recording some
+                        # statistics as floats with "nnn.0" Therefore have
+                        # to do int(float()) instead of simply int(). Sigh.
+                        setattr(day, column.field,
+                                int(float(line_dict[column.input_column])) +
+                                prev)
+                    except Exception as e:
+                        print("Failed for field {}: {}\n    Line was: {}".
+                              format(column.input_column, e, line_dict))
 
     @staticmethod
     def set_columns(_columns):
@@ -129,7 +159,8 @@ class Day:
 
                     setattr(day, column.field,
                             round(statistics.mean(
-                                Day.past_accelerations[-ROLLING_AVERAGE_DAYS:]), 2))
+                                Day.past_accelerations[-ROLLING_AVERAGE_DAYS:]),
+                                2))
 
     def __str__(self):
         out = '{}\t'.format(self.date)
@@ -148,11 +179,13 @@ def parse_args():
     parser.add_argument(
         '-3', '--admin3',
         help="Specify admin-3 level group (e.g., city / county)")
-    args = parser.parse_args()
     parser.add_argument('--parent-1',
                         help="Country to use for percentage computation")
     parser.add_argument('--parent-2',
                         help="State to use for percentage computation")
+    parser.add_argument('--parent-global', action="store_true",
+                        help="Compute percentage of global cases.")
+    args = parser.parse_args()
     return args
 
 
@@ -179,18 +212,19 @@ def get_population(focus):
     with open(POPULATION_FILE) as f:
         for line in f:
             parts = line.strip().split(',')
-            if parts[0] == focus:
+            if parts and parts[0] == focus:
                 return int(parts[1])
     # Use zero as the "no data" flag, since no entity will have a population
     # of zero
     return 0
 
 
-def process_file(path, file, focuses, worldwide):
+def process_file(path, file, focuses, worldwide, parent_level, parent_focus):
     date = file[:-4]
     with open(os.path.join(path, file)) as f:
         reader = csv.DictReader(f)
         fields = reader.fieldnames
+        levels = None
         if not worldwide:
             # If we're not filtering (getting Global stats), don't need
             # to do this.
@@ -211,19 +245,25 @@ def process_file(path, file, focuses, worldwide):
                     # Need to find everything specified
                     return
 
-        for line in reader:
-            # First, gather the collective / parent information.  We're only
-            # collecting case data.
+            # Now we have to update the parent fields to match what we found in the
+            # file above.  If the order of the "levels" list changes this code
+            # must change.  YOU HAVE BEEN WARNED!
+            if parent_level is not None:
+                if 'Country' in parent_level:
+                    parent_level = levels[0]
+                elif 'State' in parent_level:
+                    parent_level = levels[1]
 
-            # Filter, if we're filtering
-            need_line = True
-            if not worldwide:
-                for n in range(len(levels)):
-                    if focuses[n] is not None and line[levels[n]] != focuses[n]:
-                        need_line = False
-                        break
-            if need_line:
-                Day.add_line(date, line)
+        criteria = {
+            'levels': levels,
+            'focuses': focuses,
+            'worldwide': worldwide,
+            'parent_level': parent_level,
+            'parent_focus': parent_focus
+        }
+
+        for line in reader:
+            Day.add_line(date, line, criteria)
 
 
 def define_columns():
@@ -245,7 +285,7 @@ def one_plot(dates, values, focus, position, title, color):
     plt.plot(dates, values, color + '-')
 
 
-def plot_it(focus):
+def plot_it(focus, parent_focus):
     dates = []
     conf_vel = []
     conf_num = []
@@ -253,6 +293,12 @@ def plot_it(focus):
     deaths = []
     deaths_vel = []
     deaths_acc = []
+    # Percent of parent
+    conf_pop = []
+    deaths_pop = []
+
+    doing_parents = Day.all_days[-1].parent_conf_num > 0
+
     for day in Day.all_days[-DISPLAY_DAYS:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
@@ -261,11 +307,41 @@ def plot_it(focus):
         deaths.append(day.deaths_num)
         deaths_vel.append(day.daily_deaths)
         deaths_acc.append(day.avg_daily_deaths)
+        if doing_parents:
+            if day.parent_conf_num > 0:
+                conf_pop.append((day.conf_num / day.parent_conf_num) * 100)
+            else:
+                conf_pop.append(0.0)
+            if day.parent_deaths_num > 0:
+                deaths_pop.append((day.deaths_num / day.parent_deaths_num) *
+                                  100)
+            else:
+                deaths_pop.append(0.0)
+
+            # Layout of the charts depends on whether we are doing parents.
+            # We're still in "if doing_parents:"
+            conf_num_pos = 241
+            conf_daily_pos = 242
+            conf_roll_avg_pos = 243
+            conf_pop_pos = 244
+            deaths_num_pos = 245
+            deaths_daily_pos = 246
+            deaths_roll_avg_pos = 247
+            deaths_pop_pos = 248
+        else:
+            # No display of parents percentage
+            conf_num_pos = 231
+            conf_daily_pos = 232
+            conf_roll_avg_pos = 233
+            deaths_num_pos = 234
+            deaths_daily_pos = 235
+            deaths_roll_avg_pos = 236
+
     dates = [x[:-5] for x in dates]
 
     focus_population = get_population(focus)
 
-    plt.figure(figsize=(15, 9), num='{} COVID-19 History ({} days)'.
+    plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days)'.
                format(focus, len(dates)))
     plt.subplots_adjust(hspace=.27, wspace=.16,
                         top=.97, bottom=.07,
@@ -277,16 +353,24 @@ def plot_it(focus):
     else:
         confirmed_percentage = ""
 
-    one_plot(dates, conf_num, focus, 231, "{:,} Confirmed Cases {}".
+    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} Confirmed Cases {}".
              format(conf_num[-1], confirmed_percentage), 'g')
-    one_plot(dates, conf_vel, focus, 232, "{:,} Daily New Cases +{}%".
-             format(conf_vel[-1], round(100 * conf_vel[-1] / conf_num[-2], 2)),
+    # The number will print with a minus sign if < 0, so we only need to
+    # add the "+" if >= 0.
+    sign = "+" if conf_vel[-1] > 0 else ""
+    one_plot(dates, conf_vel, focus, conf_daily_pos, "{:,} Daily New Cases {}{}%".
+             format(conf_vel[-1], sign,
+                    round(100 * conf_vel[-1] / conf_num[-2], 2)),
              'y')
-    one_plot(dates, conf_accel, focus, 233,
+    one_plot(dates, conf_accel, focus, conf_roll_avg_pos,
              "{} Day Rolling Average Daily New Cases".
              format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
+    if doing_parents:
+        one_plot(dates, conf_pop, focus, conf_pop_pos,
+                 "{}% of {} cases".
+                 format(round(conf_pop[-1], 2), parent_focus), 'k')
     try:
-        one_plot(dates, deaths, focus, 234, "{:,} Deaths Cumulative: {}%".
+        one_plot(dates, deaths, focus, deaths_num_pos, "{:,} Deaths Cumulative: {}%".
                  format(deaths[-1],
                         round((deaths[-1] /
                                conf_num[-(DEATHS_LAG + 1)]) * 100, 1)),
@@ -294,12 +378,17 @@ def plot_it(focus):
     except IndexError:
         print("No data found for {}".format(focus))
         sys.exit()
-    one_plot(dates, deaths_vel, focus, 235, "{:,} Daily New Deaths +{}%".
-             format(deaths_vel[-1],
+    sign = "+" if deaths_vel[-1] > 0 else ""
+    one_plot(dates, deaths_vel, focus, deaths_daily_pos, "{:,} Daily New Deaths {}{}%".
+             format(deaths_vel[-1], sign,
                     round(100 * deaths_vel[-1] / deaths[-2], 2)), 'b')
-    one_plot(dates, deaths_acc, focus, 236,
+    one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,
              "{} Day Rolling Average Daily Deaths".
              format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
+    if doing_parents:
+        one_plot(dates, deaths_pop, focus, deaths_pop_pos,
+                 "{}% of {} deaths".
+                 format(round(deaths_pop[-1], 2), parent_focus), 'k')
     plt.show()
 
 
@@ -322,18 +411,19 @@ def get_level_focus(args):
 
 
 def get_parent_level_focus(args):
-    parents = [None, None]
-    parent_worldwide = True
+    if args.parent_global:
+        return None, 'Global'
+
     if args.parent_1:
         # Summarize a country
-        parents[0] = args.parent_1
-        parent_worldwide = False
+        return 'Country', args.parent_1
+
     if args.parent_2:
         # Summarize a state / province
-        parents[1] = args.parent_2
-        parent_worldwide = False
-    return parent_worldwide, parents
+        return 'State', args.parent_2
 
+    # No parent display requested.
+    return None, None
 
 def main():
     args = parse_args()
@@ -344,8 +434,11 @@ def main():
 
     worldwide, focuses = get_level_focus(args)
 
+    parent_level, parent_focus = get_parent_level_focus(args)
+
     for f in all_daily_files:
-        process_file(DATA_DIRECTORY, f, focuses, worldwide)
+        process_file(DATA_DIRECTORY, f, focuses, worldwide,
+                     parent_level, parent_focus)
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_rolling_average()
@@ -356,7 +449,7 @@ def main():
             focus = focuses[n]
             break
     # Use the finest grain focus that was specified
-    plot_it(focus)
+    plot_it(focus, parent_focus)
 
 
 if __name__ == '__main__':

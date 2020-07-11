@@ -1,3 +1,4 @@
+US States
 California,39512223
 Texas,28995881
 Florida,21477737
@@ -51,8 +52,8 @@ DC,705749
 Vermont,623989
 Wyoming,578759
 US,328300544
-,
-COUNTIES,
+
+COUNTIES
 Apache,71545
 Brevard,543376
 Fairfield,943457
@@ -60,24 +61,25 @@ La Paz,20735
 Maricopa,4485414
 Miami-Dade,2744880
 Mohave,207114
-,
-CITIES,
+
+CITIES
 New York City,8336817
-,
+
 PROVINCES
 British Columbia,5120184
-,
-COUNTRIES,
+
+COUNTRIES
 Argentina,45195774
 Brazil,212543125
 Canada,37738506
 England,55977178
 Ghana,31062453
 India,1379715223
+Iran,84018644
 Italy,60462246
 Russia,145934462
 Sweden,10099265
 United Kingdom,67881190
 Venezuela,28435940
-,
+
 Global,7794195599
