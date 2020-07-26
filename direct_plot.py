@@ -4,6 +4,7 @@
 import argparse
 import csv
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import os
 import re
 import statistics
@@ -13,7 +14,7 @@ import sys
 ROLLING_AVERAGE_DAYS = 7
 
 # Max days to display in the plots
-DISPLAY_DAYS = 120
+DISPLAY_DAYS = 60
 
 # Compare current death count to confirmed cases X days ago to compute death
 # rate percentage, since death usually lags diagnosis. Most important for areas
@@ -282,6 +283,10 @@ def one_plot(dates, values, focus, position, title, color):
     plt.subplot(position)
     plt.title(focus + " " + title)
     plt.xticks(rotation=90)
+    # Set x-axis major ticks to weekly interval, on Mondays
+    ####plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
+    # Format x-tick labels as 3-letter month name and day number
+    ####plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
     plt.plot(dates, values, color + '-')
 
 
@@ -337,9 +342,20 @@ def plot_it(focus, parent_focus):
             deaths_daily_pos = 235
             deaths_roll_avg_pos = 236
 
+    # Just use the month and day of the dates.
     dates = [x[:-5] for x in dates]
 
     focus_population = get_population(focus)
+
+    if doing_parents:
+        parent_population = get_population(parent_focus)
+        if parent_population > 0 and focus_population > 0:
+            percent_of_parent_population = \
+                100 * focus_population / parent_population
+            percent_of_parent_pop_str = " ({}%)".\
+                format(round(percent_of_parent_population, 2))
+        else:
+            percent_of_parent_pop_str = ""
 
     plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days)'.
                format(focus, len(dates)))
@@ -367,8 +383,9 @@ def plot_it(focus, parent_focus):
              format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
     if doing_parents:
         one_plot(dates, conf_pop, focus, conf_pop_pos,
-                 "{}% of {} cases".
-                 format(round(conf_pop[-1], 2), parent_focus), 'k')
+                 "{}% of {} cases{}".
+                 format(round(conf_pop[-1], 2), parent_focus,
+                        percent_of_parent_pop_str), 'k')
     try:
         one_plot(dates, deaths, focus, deaths_num_pos, "{:,} Deaths Cumulative: {}%".
                  format(deaths[-1],
@@ -387,8 +404,9 @@ def plot_it(focus, parent_focus):
              format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
     if doing_parents:
         one_plot(dates, deaths_pop, focus, deaths_pop_pos,
-                 "{}% of {} deaths".
-                 format(round(deaths_pop[-1], 2), parent_focus), 'k')
+                 "{}% of {} deaths{}".
+                 format(round(deaths_pop[-1], 2), parent_focus,
+                        percent_of_parent_pop_str), 'k')
     plt.show()
 
 
