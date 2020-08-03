@@ -14,7 +14,7 @@ import sys
 ROLLING_AVERAGE_DAYS = 7
 
 # Max days to display in the plots
-DISPLAY_DAYS = 60
+DISPLAY_DAYS = 160
 
 # Compare current death count to confirmed cases X days ago to compute death
 # rate percentage, since death usually lags diagnosis. Most important for areas
@@ -288,6 +288,8 @@ def one_plot(dates, values, focus, position, title, color):
     # Format x-tick labels as 3-letter month name and day number
     ####plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
     plt.plot(dates, values, color + '-')
+    axes = plt.gca()
+    axes.set_ylim(bottom=0)
 
 
 def plot_it(focus, parent_focus):
@@ -374,13 +376,20 @@ def plot_it(focus, parent_focus):
     # The number will print with a minus sign if < 0, so we only need to
     # add the "+" if >= 0.
     sign = "+" if conf_vel[-1] > 0 else ""
-    one_plot(dates, conf_vel, focus, conf_daily_pos, "{:,} Daily New Cases {}{}%".
+    one_plot(dates, conf_vel, focus, conf_daily_pos,
+             "{:,} Daily New Cases {}{}%".
              format(conf_vel[-1], sign,
                     round(100 * conf_vel[-1] / conf_num[-2], 2)),
              'y')
+    sign = "+" if conf_accel[-1] > conf_accel[-2] else ""
     one_plot(dates, conf_accel, focus, conf_roll_avg_pos,
-             "{} Day Rolling Average Daily New Cases".
-             format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
+             "{:,} {} Day Avg New Cases {}{}%".
+             format(conf_accel[-1],
+                    min(len(dates), ROLLING_AVERAGE_DAYS),
+                    sign,
+                    round(100 *
+                          (conf_accel[-1] - conf_accel[-2]) / conf_accel[-2],
+                          2)), 'k')
     if doing_parents:
         one_plot(dates, conf_pop, focus, conf_pop_pos,
                  "{}% of {} cases{}".
@@ -395,13 +404,23 @@ def plot_it(focus, parent_focus):
     except IndexError:
         print("No data found for {}".format(focus))
         sys.exit()
-    sign = "+" if deaths_vel[-1] > 0 else ""
+    sign = "+" if deaths_vel[-1] > deaths_vel[-2] else ""
     one_plot(dates, deaths_vel, focus, deaths_daily_pos, "{:,} Daily New Deaths {}{}%".
              format(deaths_vel[-1], sign,
                     round(100 * deaths_vel[-1] / deaths[-2], 2)), 'b')
+    try:
+        deaths_inc_pct_sign = "-" if deaths_acc[-1] < deaths_acc[-2] else ""
+        deaths_inc_pct_str = "{}{}%".format(
+            deaths_inc_pct_sign, round(
+                100 * (deaths_acc[-1] - deaths_acc[-2]) / deaths_acc[-2], 2))
+    except ZeroDivisionError:
+        deaths_inc_pct_str = ""
+
     one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,
-             "{} Day Rolling Average Daily Deaths".
-             format(min(len(dates), ROLLING_AVERAGE_DAYS)), 'k')
+             "{} {} Day Rolling Avg Deaths {}{}".
+             format(deaths_acc[-1],
+                    min(len(dates), ROLLING_AVERAGE_DAYS),
+                    sign, deaths_inc_pct_str), 'k')
     if doing_parents:
         one_plot(dates, deaths_pop, focus, deaths_pop_pos,
                  "{}% of {} deaths{}".
