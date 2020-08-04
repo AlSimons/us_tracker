@@ -4,13 +4,14 @@ from sqlalchemy.orm.exc import NoResultFound
 from database_schema import Base, Location, Datum, LastDate
 from file_handling import get_files, filename_to_ordinal_date, \
     ordinal_date_to_string
+from state_abbreviations import state_abbreviations
 
 import csv
 import os
 import sys
 
 
-DATABASE_NAME = 'sqlite:///covid_data.db'
+DATABASE_NAME = 'sqlite:///covid_data_RELOAD.db'
 JHU_DATA_DIRECTORY = r'..\COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
 
 
@@ -67,6 +68,38 @@ def update_latest_ordinal_date(session, ordinal_date):
     session.commit()
 
 
+def fix_admin1(admin1):
+    admin2, abbreviated_admin1 = [x.strip() for x in admin1.split(',')]
+
+    if abbreviated_admin1 in state_abbreviations:
+        return admin2, state_abbreviations[abbreviated_admin1]
+
+    if '(' in abbreviated_admin1:
+        abbreviated_admin1, parenthetical = [x.strip() for x in
+                                             abbreviated_admin1.split('(')]
+        if abbreviated_admin1 in state_abbreviations:
+            return admin2, state_abbreviations[abbreviated_admin1] + \
+                ' (' + parenthetical
+
+    # A real oddball in 3-14 and 3-15.
+    if admin2 == 'Virgin Islands' and abbreviated_admin1 == 'U.S':
+        return None, admin2
+
+    # A known instance that is fine, so don't warn about it.
+    if abbreviated_admin1 != 'Sint Eustatius and Saba':
+        print("Not found:", abbreviated_admin1)
+
+    return None, admin1
+
+
+def fix_jhu_key(jhu_key):
+    # Some JHU Combined Keys are built wrong, and have leading commas.
+    # Get rid of them.
+    while jhu_key[1] == ',':
+        jhu_key = jhu_key[1:]
+    return jhu_key
+
+
 def get_location(session, levels, line):
     country = line[levels[0]]
     admin1 = line[levels[1]]
@@ -75,8 +108,13 @@ def get_location(session, levels, line):
     else:
         admin2 = None
 
+    if not admin2 and ',' in admin1:
+        admin2, admin1 = fix_admin1(admin1)
+
     if 'Combined_Key' in line:
         jhu_key = line['Combined_Key']
+        if jhu_key[1] == ',':
+            jhu_key = fix_jhu_key(jhu_key)
     else:
         # Have to construct it from Admin2, State, and Country
         # if they exist and are non-null. Also change empty strings to
@@ -155,14 +193,13 @@ def process_one_jhu_file(session, filepath, ordinal_date):
     update_latest_ordinal_date(session, ordinal_date)
 
 
-
 def read_jhu_files(session):
     # Get the files to process
     files = get_files(JHU_DATA_DIRECTORY)
 
     # Get the last date already processed.  Don't want to re-do any data.
     try:
-        last_ordinal_date_processed = session.query(LastDate).one()
+        last_ordinal_date_processed = session.query(LastDate).one().ordinal_date
     except NoResultFound:
         # Nothing in the DB so far means we haven't processed any files.
         last_ordinal_date_processed = 0
@@ -170,12 +207,15 @@ def read_jhu_files(session):
     # For each file get the associated date.
     for filename in files:
         ordinal_date = filename_to_ordinal_date(filename)
-        print("Processing", ordinal_date_to_string(ordinal_date))
         # Have we already processed this one?
         if ordinal_date <= last_ordinal_date_processed:
             continue
-        process_one_jhu_file(session, os.path.join(JHU_DATA_DIRECTORY, filename),
+
+        print("Processing", ordinal_date_to_string(ordinal_date))
+        process_one_jhu_file(session,
+                             os.path.join(JHU_DATA_DIRECTORY, filename),
                              ordinal_date)
+
 
 def create_database(engine):
     Base.metadata.create_all(engine)

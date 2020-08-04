@@ -1,6 +1,7 @@
 import re
 import os
 import datetime
+import sys
 
 
 def get_files(from_dir):
@@ -30,3 +31,12 @@ def filename_to_ordinal_date(filename):
 
 def ordinal_date_to_string(ordinal):
     return str(datetime.datetime.fromordinal(ordinal).date())
+
+
+def main():
+    for ord_date in sys.argv[1:]:
+        print(ord_date, ordinal_date_to_string(int(ord_date)))
+
+
+if __name__ == '__main__':
+    main()
