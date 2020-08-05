@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 
-
+# Standard library
 import argparse
-import csv
+import datetime
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 import re
 import statistics
 import sys
+
+# Project imports
+from file_handling import get_files
+from database_schema import Base, Location, Datum, LastDate
+
+# SQL Alchemy imports
+from sqlalchemy import create_engine, text, MetaData, Table, func, select
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm.exc import NoResultFound
+
 
 # Number of days to include in the X days rolling average plots
 ROLLING_AVERAGE_DAYS = 7
@@ -22,19 +32,16 @@ DISPLAY_DAYS = 160
 # low death rate.
 DEATHS_LAG = 10
 
-DATA_DIRECTORY = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
+DATABASE_NAME = r'sqlite:///us_tracker\covid_data_RELOAD.db'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
 
 class ColumnInfo:
     def __init__(self, field,
-                 computed_type, depended_field,
-                 depended_field2='', input_column='',):
+                 computed_type, depended_field):
         self.field = field
         self.computed_type = computed_type
         self.depended_field = depended_field
-        self.depended_field2 = depended_field2
-        self.input_column = input_column
 
 
 class Day:
@@ -43,66 +50,40 @@ class Day:
     day_hash = {}
     past_accelerations = []
 
-    def __init__(self, date):
+    def __init__(self, date,
+                 conf_num, deaths_num,
+                 parent_conf_num, parent_deaths_num):
         self.date = date
         Day.all_days.append(self)
         Day.day_hash[date] = self
         for column in Day.columns:
             setattr(self, column.field, 0)
-        # Handle the parent stats somewhat differently. Since we're making
-        # multiple uses of some file columns, it got too complex to try to
-        # tie it together with the main usage.
-        self.parent_conf_num = 0
-        self.parent_deaths_num = 0
-
-    @staticmethod
-    def add_line(date, line_dict, criteria):
-        if date not in Day.day_hash.keys():
-            Day(date)
-        day = Day.day_hash[date]
-
-        # First, gather the collective / parent information.  Don't need to do
-        # this if parent info was not requested.
-        if criteria['parent_focus'] is not None:
-            need_line = True
-            # Don't need to filter, if we're looking for global parent stats
-            if not criteria['parent_focus'] == 'Global':
-                if line_dict[criteria['parent_level']] != \
-                        criteria['parent_focus']:
-                    need_line = False
-            if need_line:
-                day.parent_conf_num += int(line_dict['Confirmed'])
-                day.parent_deaths_num += int(line_dict['Deaths'])
-
-        # Filter, if we're filtering
-        need_line = True
-        if not criteria['worldwide']:
-            for n in range(len(criteria['levels'])):
-                if criteria['focuses'][n] is not None and \
-                        line_dict[criteria['levels'][n]] != \
-                        criteria['focuses'][n]:
-                    need_line = False
-                    break
-        if need_line:
-            for column in Day.columns:
-                if column.input_column and \
-                        column.input_column in line_dict.keys() and \
-                        line_dict[column.input_column]:
-                    prev = getattr(day, column.field)
-                    try:
-                        # For some strange reason, JHU are recording some
-                        # statistics as floats with "nnn.0" Therefore have
-                        # to do int(float()) instead of simply int(). Sigh.
-                        setattr(day, column.field,
-                                int(float(line_dict[column.input_column])) +
-                                prev)
-                    except Exception as e:
-                        print("Failed for field {}: {}\n    Line was: {}".
-                              format(column.input_column, e, line_dict))
+        self.conf_num = conf_num
+        self.deaths_num = deaths_num
+        self.parent_conf_num = parent_conf_num
+        self.parent_deaths_num = parent_deaths_num
 
     @staticmethod
     def set_columns(_columns):
         Day.columns = _columns
+
+    @staticmethod
+    def set_data(location_data, parent_data):
+        # Sanity check, since we're going to walk the two result lists
+        # in parallel.
+        if len(location_data) != len(parent_data):
+            sys.exit("How are the lengths of the two results different: {} {}?". \
+                     format(len(location_data), len(parent_data)))
+        found_first = False
+        for n in range(len(location_data)):
+            # Skip any data before first case for the location.
+            if not found_first and location_data[n][1] == 0:
+                continue
+
+            # OK, let's create days!
+            Day(ordinal_date_to_string(location_data[n][0], True),
+                location_data[n][1], location_data[n][2],
+                parent_data[n][1], parent_data[n][2])
 
     def compute_vel_acc(self, prev, dependence_type):
         # This handles velocity and acceleration, not smoothed acceleration.
@@ -167,7 +148,9 @@ class Day:
         out = '{}\t'.format(self.date)
         for column in Day.columns:
             out += str(getattr(self, column.field)) + '\t'
-        return out[:-1]
+            out += str(self.parent_conf_num) + '\t'
+            out += str(self.parent_deaths_num)
+        return out
 
 
 def parse_args():
@@ -190,25 +173,6 @@ def parse_args():
     return args
 
 
-def get_files(from_dir):
-    """
-    From the list of all files in the given directory, find the ones that
-    match mm-dd-yyyy.csv, and sort them by date. (os.listdir() returns in
-    arbitrary order.
-
-    TODO: create a real sort, which changes mm-dd-yyyy into yyyymmdd to perform
-    the sort!  It'll work for now, because the year hasn't yet changed.
-    """
-    all_files = os.listdir(from_dir)
-    filtered = []
-    for f in all_files:
-        if re.match(r'\d{2}-\d{2}-\d{4}\.csv', f):
-            filtered.append(f)
-    # The limiting expression below makes sure that if the data are available
-    # we can do the smoothing of acceleration for even the first displayed day.
-    return sorted(filtered)[-(ROLLING_AVERAGE_DAYS + DISPLAY_DAYS):]
-
-
 def get_population(focus):
     with open(POPULATION_FILE) as f:
         for line in f:
@@ -220,61 +184,14 @@ def get_population(focus):
     return 0
 
 
-def process_file(path, file, focuses, worldwide, parent_level, parent_focus):
-    date = file[:-4]
-    with open(os.path.join(path, file)) as f:
-        reader = csv.DictReader(f)
-        fields = reader.fieldnames
-        levels = None
-        if not worldwide:
-            # If we're not filtering (getting Global stats), don't need
-            # to do this.
-
-            # The column headers in the daily report files are not completely
-            # uniform, but close enough that we can figure out which ones to
-            # use.  Initially, levels is ['Country', 'State', 'Admin2']. We
-            # fix it here.
-            levels = ['Country', 'State', 'Admin2']
-            for n in range(len(levels)):
-                found = False
-                for field in fields:
-                    if levels[n] in field:
-                        levels[n] = field
-                        found = True
-                        break
-                if not found:
-                    # Need to find everything specified
-                    return
-
-            # Now we have to update the parent fields to match what we found in the
-            # file above.  If the order of the "levels" list changes this code
-            # must change.  YOU HAVE BEEN WARNED!
-            if parent_level is not None:
-                if 'Country' in parent_level:
-                    parent_level = levels[0]
-                elif 'State' in parent_level:
-                    parent_level = levels[1]
-
-        criteria = {
-            'levels': levels,
-            'focuses': focuses,
-            'worldwide': worldwide,
-            'parent_level': parent_level,
-            'parent_focus': parent_focus
-        }
-
-        for line in reader:
-            Day.add_line(date, line, criteria)
-
-
 def define_columns():
     columns_defs = [
-        ColumnInfo('conf_num', '', '', '', 'Confirmed'),
-        ColumnInfo('daily_conf', 'vel', 'conf_num',),
-        ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf',),
-        ColumnInfo('deaths_num', '', '', '', 'Deaths',),
-        ColumnInfo('daily_deaths', 'vel', 'deaths_num',),
-        ColumnInfo('avg_daily_deaths', 'rolling_average', 'daily_deaths',),
+        ColumnInfo('conf_num', '', ''),
+        ColumnInfo('daily_conf', 'vel', 'conf_num'),
+        ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf'),
+        ColumnInfo('deaths_num', '', ''),
+        ColumnInfo('daily_deaths', 'vel', 'deaths_num'),
+        ColumnInfo('avg_daily_deaths', 'rolling_average', 'daily_deaths'),
     ]
     return columns_defs
 
@@ -284,9 +201,9 @@ def one_plot(dates, values, focus, position, title, color):
     plt.title(focus + " " + title)
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
-    ####plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
+    #### plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
     # Format x-tick labels as 3-letter month name and day number
-    ####plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
+    #### plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
     plt.plot(dates, values, color + '-')
     axes = plt.gca()
     axes.set_ylim(bottom=0)
@@ -343,9 +260,6 @@ def plot_it(focus, parent_focus):
             deaths_num_pos = 234
             deaths_daily_pos = 235
             deaths_roll_avg_pos = 236
-
-    # Just use the month and day of the dates.
-    dates = [x[:-5] for x in dates]
 
     focus_population = get_population(focus)
 
@@ -463,30 +377,128 @@ def get_parent_level_focus(args):
     return None, None
 
 
+engine = None
+
+
+def get_engine():
+    global engine
+    if engine is None:
+        engine = create_engine(DATABASE_NAME, echo=False)
+    return engine
+
+
+def get_tables_and_connection():
+    eng = get_engine()
+    metadata = MetaData()
+    location_table = \
+        Table('location', metadata, autoload=True,
+              autoload_with=engine)
+    datum_table = \
+        Table('datum', metadata, autoload=True,
+              autoload_with=engine)
+    conn = engine.connect()
+    return location_table, datum_table, eng
+
+
+def ordinal_date_to_string(ordinal, mmdd=False):
+    date_string = str(datetime.datetime.fromordinal(ordinal).date())
+    if mmdd:
+        date_string = date_string[5:]
+    return date_string
+
+
+def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
+    """
+    First we get a list of all the jhu_keys in the requested focus.
+    Then we will get all the data for those location keys.
+    :param focuses: a list of [country, admin1, admin2] describing the location
+        we want to plot.  For instance, ['US', None, None], or
+        [None, 'Arizona', None].
+    :param worldwide: True if we are going for global statistics.
+    :param parent_level:
+    :param parent_focus:
+    :return:
+    """
+    location, datum, conn = get_tables_and_connection()
+    engine = get_engine()
+    focus_texts = []
+    base_query_text = """
+    SELECT 
+            datum.ordinal_date AS odate, 
+            SUM(datum.confirmed) AS conf,
+            SUM(datum.deaths) AS deaths
+        FROM datum, location WHERE 
+    """
+
+    # Build the location's where based on the focuses
+    if focuses[0] is not None:
+        focus_texts.append('country == "{}"'.format(focuses[0]))
+    if focuses[1] is not None:
+        focus_texts.append('admin1 == "{}"'.format(focuses[1]))
+    if focuses[2] is not None:
+        focus_texts.append('admin2 == "{}"'.format(focuses[2]))
+
+    if focus_texts:
+        where_clause = ' AND '.join(focus_texts) + ' AND '
+    else:
+        where_clause = ''
+
+    query_tail = """
+        location.jhu_key = datum.location_jhu_key
+    GROUP BY odate ORDER BY odate
+    """
+    query_text = base_query_text + where_clause + query_tail
+
+    # The query result is a generator like object.  We will need to do
+    # a few things that require a list.
+    location_result = list(conn.execute(text(query_text)))
+
+    # Now work on the parent where clause
+    if parent_focus is None:
+        # Nothing left to do.
+        return location_result, None
+
+    if parent_focus == 'Global':
+        where_clause = ''
+    elif parent_level == 'Country':
+        where_clause = 'country = "{}"'.format(parent_focus)
+    elif parent_level == 'State':
+        where_clause = 'admin1 = "{}"'.format(parent_focus)
+    else:
+        sys.exit("Huh? Can't figure out parent")
+
+    # Is is likely that the parent has more (earlier) data than the location.
+    # Only get the parent data from the start of the location's data
+    date_limit_text = "odate >= {} AND ".format(location_result[0][0])
+    query_text = base_query_text + where_clause + ' AND ' + \
+                 date_limit_text + query_tail
+    parent_result = list(conn.execute(text(query_text)))
+
+    return location_result, parent_result
+
+
 def main():
     args = parse_args()
     columns = define_columns()
     Day.set_columns(columns)
 
-    all_daily_files = get_files(DATA_DIRECTORY)
-
     worldwide, focuses = get_level_focus(args)
 
     parent_level, parent_focus = get_parent_level_focus(args)
 
-    for f in all_daily_files:
-        process_file(DATA_DIRECTORY, f, focuses, worldwide,
-                     parent_level, parent_focus)
+    location_data, parent_data = get_data_from_db(focuses, worldwide,
+                                                  parent_level, parent_focus)
+    Day.set_data(location_data, parent_data)
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_rolling_average()
 
+    # Use the finest grain focus that was specified
     focus = 'Global'
     for n in range(2, -1, -1):
         if focuses[n] is not None:
             focus = focuses[n]
             break
-    # Use the finest grain focus that was specified
     plot_it(focus, parent_focus)
 
 
