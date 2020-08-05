@@ -24,7 +24,7 @@ from sqlalchemy.orm.exc import NoResultFound
 ROLLING_AVERAGE_DAYS = 7
 
 # Max days to display in the plots
-DISPLAY_DAYS = 160
+DISPLAY_DAYS = 60
 
 # Compare current death count to confirmed cases X days ago to compute death
 # rate percentage, since death usually lags diagnosis. Most important for areas
@@ -32,7 +32,7 @@ DISPLAY_DAYS = 160
 # low death rate.
 DEATHS_LAG = 10
 
-DATABASE_NAME = r'sqlite:///us_tracker\covid_data_RELOAD.db'
+DATABASE_NAME = r'sqlite:///us_tracker\covid_data.db'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
 
@@ -52,7 +52,7 @@ class Day:
 
     def __init__(self, date,
                  conf_num, deaths_num,
-                 parent_conf_num, parent_deaths_num):
+                 parent_conf_num = 0, parent_deaths_num = 0):
         self.date = date
         Day.all_days.append(self)
         Day.day_hash[date] = self
@@ -71,19 +71,18 @@ class Day:
     def set_data(location_data, parent_data):
         # Sanity check, since we're going to walk the two result lists
         # in parallel.
-        if len(location_data) != len(parent_data):
+        if parent_data is not None and len(location_data) != len(parent_data):
             sys.exit("How are the lengths of the two results different: {} {}?". \
                      format(len(location_data), len(parent_data)))
-        found_first = False
         for n in range(len(location_data)):
-            # Skip any data before first case for the location.
-            if not found_first and location_data[n][1] == 0:
-                continue
-
             # OK, let's create days!
-            Day(ordinal_date_to_string(location_data[n][0], True),
-                location_data[n][1], location_data[n][2],
-                parent_data[n][1], parent_data[n][2])
+            if parent_data is not None:
+                Day(ordinal_date_to_string(location_data[n][0], True),
+                    location_data[n][1], location_data[n][2],
+                    parent_data[n][1], parent_data[n][2])
+            else:
+                Day(ordinal_date_to_string(location_data[n][0], True),
+                    location_data[n][1], location_data[n][2])
 
     def compute_vel_acc(self, prev, dependence_type):
         # This handles velocity and acceleration, not smoothed acceleration.

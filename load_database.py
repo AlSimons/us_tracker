@@ -11,7 +11,7 @@ import os
 import sys
 
 
-DATABASE_NAME = 'sqlite:///covid_data_RELOAD.db'
+DATABASE_NAME = 'sqlite:///covid_data.db'
 JHU_DATA_DIRECTORY = r'..\COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
 
 
