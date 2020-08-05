@@ -57,6 +57,15 @@ def process_line(session, levels, line, ordinal_date):
 
 
 def update_latest_ordinal_date(session, ordinal_date):
+    """
+    We don't want to reprocess a file that has already been loaded, so as
+    each file is completed we record the date of the just completed file.
+    When we're scanning the directory for files to load, we skip any before
+    or on this date.
+    :param session: The sqlalchemy orm session.
+    :param ordinal_date: The ordinal date of the just completed file
+    :return: None
+    """
     try:
         # This should succeed except for the very first time we process a file.
         last_date = session.query(LastDate).filter(LastDate.ordinal_date).one()
@@ -69,6 +78,16 @@ def update_latest_ordinal_date(session, ordinal_date):
 
 
 def fix_admin1(admin1):
+    """
+    Early files didn't have an admin2 field.  When JHU wanted to go to a finer
+    granularity than the US state, they combined the admin2 and state into
+    the state column, for instance, "Boston, MA".  This routine is used to
+    split those elements out.  The state was almost always abbreviated, so
+    we also expand the state to the full spelling to match the representation in
+    later files.
+    :param admin1:
+    :return: admin2, (expanded) admin1
+    """
     admin2, abbreviated_admin1 = [x.strip() for x in admin1.split(',')]
 
     if abbreviated_admin1 in state_abbreviations:
@@ -82,7 +101,7 @@ def fix_admin1(admin1):
                 ' (' + parenthetical
 
     # A real oddball in 3-14 and 3-15.
-    if admin2 == 'Virgin Islands' and abbreviated_admin1 == 'U.S':
+    if admin2 == 'Virgin Islands' and abbreviated_admin1 == 'U.S.':
         return None, admin2
 
     # A known instance that is fine, so don't warn about it.

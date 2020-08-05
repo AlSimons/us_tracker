@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-
+# Standard library
 import argparse
 import csv
 import matplotlib.pyplot as plt
@@ -9,6 +9,16 @@ import os
 import re
 import statistics
 import sys
+
+# Project imports
+from file_handling import get_files
+from database_schema import Base, Location, Datum, LastDate
+
+# SQL Alchemy imports
+from sqlalchemy import create_engine, text, MetaData, Table
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm.exc import NoResultFound
+
 
 # Number of days to include in the X days rolling average plots
 ROLLING_AVERAGE_DAYS = 7
@@ -22,7 +32,7 @@ DISPLAY_DAYS = 160
 # low death rate.
 DEATHS_LAG = 10
 
-DATA_DIRECTORY = r'COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
+DATABASE_NAME = r'sqlite:///us_tracker\covid_data.db'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
 
@@ -190,25 +200,6 @@ def parse_args():
     return args
 
 
-def get_files(from_dir):
-    """
-    From the list of all files in the given directory, find the ones that
-    match mm-dd-yyyy.csv, and sort them by date. (os.listdir() returns in
-    arbitrary order.
-
-    TODO: create a real sort, which changes mm-dd-yyyy into yyyymmdd to perform
-    the sort!  It'll work for now, because the year hasn't yet changed.
-    """
-    all_files = os.listdir(from_dir)
-    filtered = []
-    for f in all_files:
-        if re.match(r'\d{2}-\d{2}-\d{4}\.csv', f):
-            filtered.append(f)
-    # The limiting expression below makes sure that if the data are available
-    # we can do the smoothing of acceleration for even the first displayed day.
-    return sorted(filtered)[-(ROLLING_AVERAGE_DAYS + DISPLAY_DAYS):]
-
-
 def get_population(focus):
     with open(POPULATION_FILE) as f:
         for line in f:
@@ -218,53 +209,6 @@ def get_population(focus):
     # Use zero as the "no data" flag, since no entity will have a population
     # of zero
     return 0
-
-
-def process_file(path, file, focuses, worldwide, parent_level, parent_focus):
-    date = file[:-4]
-    with open(os.path.join(path, file)) as f:
-        reader = csv.DictReader(f)
-        fields = reader.fieldnames
-        levels = None
-        if not worldwide:
-            # If we're not filtering (getting Global stats), don't need
-            # to do this.
-
-            # The column headers in the daily report files are not completely
-            # uniform, but close enough that we can figure out which ones to
-            # use.  Initially, levels is ['Country', 'State', 'Admin2']. We
-            # fix it here.
-            levels = ['Country', 'State', 'Admin2']
-            for n in range(len(levels)):
-                found = False
-                for field in fields:
-                    if levels[n] in field:
-                        levels[n] = field
-                        found = True
-                        break
-                if not found:
-                    # Need to find everything specified
-                    return
-
-            # Now we have to update the parent fields to match what we found in the
-            # file above.  If the order of the "levels" list changes this code
-            # must change.  YOU HAVE BEEN WARNED!
-            if parent_level is not None:
-                if 'Country' in parent_level:
-                    parent_level = levels[0]
-                elif 'State' in parent_level:
-                    parent_level = levels[1]
-
-        criteria = {
-            'levels': levels,
-            'focuses': focuses,
-            'worldwide': worldwide,
-            'parent_level': parent_level,
-            'parent_focus': parent_focus
-        }
-
-        for line in reader:
-            Day.add_line(date, line, criteria)
 
 
 def define_columns():
@@ -284,9 +228,9 @@ def one_plot(dates, values, focus, position, title, color):
     plt.title(focus + " " + title)
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
-    ####plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
+    #### plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
     # Format x-tick labels as 3-letter month name and day number
-    ####plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
+    #### plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
     plt.plot(dates, values, color + '-')
     axes = plt.gca()
     axes.set_ylim(bottom=0)
@@ -462,19 +406,93 @@ def get_parent_level_focus(args):
     # No parent display requested.
     return None, None
 
+
+connection_info = {
+    'location_table': None,
+    'engine': None,
+    'metadata': None,
+    'cols': None,
+    'conn': None,
+}
+
+
+engine = None
+
+
+def get_engine():
+    global engine
+    if engine is None:
+        engine = create_engine(DATABASE_NAME, echo=True)
+    return engine
+
+
+def get_location_table_and_connection():
+    global connection_info
+    if connection_info['location_table'] is None:
+        connection_info['engine'] = get_engine()
+        connection_info['metadata'] = MetaData()
+        connection_info['location_table'] = \
+            Table('location', connection_info['metadata'], autoload=True,
+                  autoload_with=connection_info['engine'])
+        conn = connection_info['engine'].connect()
+    return connection_info['location_table'], connection_info['engine']
+
+
+def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
+    """
+    First we get a list of all the jhu_keys in the requested focus.
+    Then we will get all the data for those location keys.
+    :param focuses: a list of [country, admin1, admin2] describing the location
+        we want to plot.  For instance, ['US', None, None], or
+        [None, 'Arizona', None].
+    :param worldwide: True if we are going for global statistics.
+    :param parent_level:
+    :param parent_focus:
+    :return:
+    """
+    # Use sqlalchemy expressions to get the jhu_keys.
+    location, conn = get_location_table_and_connection()
+
+    engine = get_engine()
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    focus_texts = []
+
+    query = session.query(Location)
+
+    # Build the where based on the focuses
+    if focuses[0] is not None:
+        focus_texts.append('country == "{}"'.format(focuses[0]))
+    if focuses[1] is not None:
+        focus_texts.append('admin1 == "{}"'.format(focuses[1]))
+    if focuses[2] is not None:
+        focus_texts.append('admin2 == "{}"'.format(focuses[2]))
+
+    if focus_texts:
+        where_clause = ' and '.join(focus_texts)
+
+        #query = query.filter(text(where_clause))
+
+    #result = query.all()
+    print("Found locations", len(result))
+    location = result[1]
+    print('Country', location.country)
+    print('Admin1', location.admin1)
+    print('Admin2', location.admin2)
+    print('jhu_key', location.jhu_key)
+    sys.exit()
+
+
 def main():
     args = parse_args()
     columns = define_columns()
     Day.set_columns(columns)
 
-    all_daily_files = get_files(DATA_DIRECTORY)
-
     worldwide, focuses = get_level_focus(args)
 
     parent_level, parent_focus = get_parent_level_focus(args)
 
-    for f in all_daily_files:
-        process_file(DATA_DIRECTORY, f, focuses, worldwide,
+    get_data_from_db(focuses, worldwide,
                      parent_level, parent_focus)
 
     Day.compute_pcts_velocities_accelerations()
