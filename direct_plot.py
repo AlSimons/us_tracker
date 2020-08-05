@@ -2,7 +2,7 @@
 
 # Standard library
 import argparse
-import csv
+import datetime
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
@@ -15,7 +15,7 @@ from file_handling import get_files
 from database_schema import Base, Location, Datum, LastDate
 
 # SQL Alchemy imports
-from sqlalchemy import create_engine, text, MetaData, Table
+from sqlalchemy import create_engine, text, MetaData, Table, func, select
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.orm.exc import NoResultFound
 
@@ -32,19 +32,16 @@ DISPLAY_DAYS = 160
 # low death rate.
 DEATHS_LAG = 10
 
-DATABASE_NAME = r'sqlite:///us_tracker\covid_data.db'
+DATABASE_NAME = r'sqlite:///us_tracker\covid_data_RELOAD.db'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
 
 class ColumnInfo:
     def __init__(self, field,
-                 computed_type, depended_field,
-                 depended_field2='', input_column='',):
+                 computed_type, depended_field):
         self.field = field
         self.computed_type = computed_type
         self.depended_field = depended_field
-        self.depended_field2 = depended_field2
-        self.input_column = input_column
 
 
 class Day:
@@ -53,66 +50,40 @@ class Day:
     day_hash = {}
     past_accelerations = []
 
-    def __init__(self, date):
+    def __init__(self, date,
+                 conf_num, deaths_num,
+                 parent_conf_num, parent_deaths_num):
         self.date = date
         Day.all_days.append(self)
         Day.day_hash[date] = self
         for column in Day.columns:
             setattr(self, column.field, 0)
-        # Handle the parent stats somewhat differently. Since we're making
-        # multiple uses of some file columns, it got too complex to try to
-        # tie it together with the main usage.
-        self.parent_conf_num = 0
-        self.parent_deaths_num = 0
-
-    @staticmethod
-    def add_line(date, line_dict, criteria):
-        if date not in Day.day_hash.keys():
-            Day(date)
-        day = Day.day_hash[date]
-
-        # First, gather the collective / parent information.  Don't need to do
-        # this if parent info was not requested.
-        if criteria['parent_focus'] is not None:
-            need_line = True
-            # Don't need to filter, if we're looking for global parent stats
-            if not criteria['parent_focus'] == 'Global':
-                if line_dict[criteria['parent_level']] != \
-                        criteria['parent_focus']:
-                    need_line = False
-            if need_line:
-                day.parent_conf_num += int(line_dict['Confirmed'])
-                day.parent_deaths_num += int(line_dict['Deaths'])
-
-        # Filter, if we're filtering
-        need_line = True
-        if not criteria['worldwide']:
-            for n in range(len(criteria['levels'])):
-                if criteria['focuses'][n] is not None and \
-                        line_dict[criteria['levels'][n]] != \
-                        criteria['focuses'][n]:
-                    need_line = False
-                    break
-        if need_line:
-            for column in Day.columns:
-                if column.input_column and \
-                        column.input_column in line_dict.keys() and \
-                        line_dict[column.input_column]:
-                    prev = getattr(day, column.field)
-                    try:
-                        # For some strange reason, JHU are recording some
-                        # statistics as floats with "nnn.0" Therefore have
-                        # to do int(float()) instead of simply int(). Sigh.
-                        setattr(day, column.field,
-                                int(float(line_dict[column.input_column])) +
-                                prev)
-                    except Exception as e:
-                        print("Failed for field {}: {}\n    Line was: {}".
-                              format(column.input_column, e, line_dict))
+        self.conf_num = conf_num
+        self.deaths_num = deaths_num
+        self.parent_conf_num = parent_conf_num
+        self.parent_deaths_num = parent_deaths_num
 
     @staticmethod
     def set_columns(_columns):
         Day.columns = _columns
+
+    @staticmethod
+    def set_data(location_data, parent_data):
+        # Sanity check, since we're going to walk the two result lists
+        # in parallel.
+        if len(location_data) != len(parent_data):
+            sys.exit("How are the lengths of the two results different: {} {}?". \
+                     format(len(location_data), len(parent_data)))
+        found_first = False
+        for n in range(len(location_data)):
+            # Skip any data before first case for the location.
+            if not found_first and location_data[n][1] == 0:
+                continue
+
+            # OK, let's create days!
+            Day(ordinal_date_to_string(location_data[n][0], True),
+                location_data[n][1], location_data[n][2],
+                parent_data[n][1], parent_data[n][2])
 
     def compute_vel_acc(self, prev, dependence_type):
         # This handles velocity and acceleration, not smoothed acceleration.
@@ -177,7 +148,9 @@ class Day:
         out = '{}\t'.format(self.date)
         for column in Day.columns:
             out += str(getattr(self, column.field)) + '\t'
-        return out[:-1]
+            out += str(self.parent_conf_num) + '\t'
+            out += str(self.parent_deaths_num)
+        return out
 
 
 def parse_args():
@@ -213,12 +186,12 @@ def get_population(focus):
 
 def define_columns():
     columns_defs = [
-        ColumnInfo('conf_num', '', '', '', 'Confirmed'),
-        ColumnInfo('daily_conf', 'vel', 'conf_num',),
-        ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf',),
-        ColumnInfo('deaths_num', '', '', '', 'Deaths',),
-        ColumnInfo('daily_deaths', 'vel', 'deaths_num',),
-        ColumnInfo('avg_daily_deaths', 'rolling_average', 'daily_deaths',),
+        ColumnInfo('conf_num', '', ''),
+        ColumnInfo('daily_conf', 'vel', 'conf_num'),
+        ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf'),
+        ColumnInfo('deaths_num', '', ''),
+        ColumnInfo('daily_deaths', 'vel', 'deaths_num'),
+        ColumnInfo('avg_daily_deaths', 'rolling_average', 'daily_deaths'),
     ]
     return columns_defs
 
@@ -287,9 +260,6 @@ def plot_it(focus, parent_focus):
             deaths_num_pos = 234
             deaths_daily_pos = 235
             deaths_roll_avg_pos = 236
-
-    # Just use the month and day of the dates.
-    dates = [x[:-5] for x in dates]
 
     focus_population = get_population(focus)
 
@@ -407,15 +377,6 @@ def get_parent_level_focus(args):
     return None, None
 
 
-connection_info = {
-    'location_table': None,
-    'engine': None,
-    'metadata': None,
-    'cols': None,
-    'conn': None,
-}
-
-
 engine = None
 
 
@@ -426,16 +387,24 @@ def get_engine():
     return engine
 
 
-def get_location_table_and_connection():
-    global connection_info
-    if connection_info['location_table'] is None:
-        connection_info['engine'] = get_engine()
-        connection_info['metadata'] = MetaData()
-        connection_info['location_table'] = \
-            Table('location', connection_info['metadata'], autoload=True,
-                  autoload_with=connection_info['engine'])
-        conn = connection_info['engine'].connect()
-    return connection_info['location_table'], connection_info['engine']
+def get_tables_and_connection():
+    eng = get_engine()
+    metadata = MetaData()
+    location_table = \
+        Table('location', metadata, autoload=True,
+              autoload_with=engine)
+    datum_table = \
+        Table('datum', metadata, autoload=True,
+              autoload_with=engine)
+    conn = engine.connect()
+    return location_table, datum_table, eng
+
+
+def ordinal_date_to_string(ordinal, mmdd=False):
+    date_string = str(datetime.datetime.fromordinal(ordinal).date())
+    if mmdd:
+        date_string = date_string[5:]
+    return date_string
 
 
 def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
@@ -450,17 +419,18 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     :param parent_focus:
     :return:
     """
-    # Use sqlalchemy expressions to get the jhu_keys.
-    location, conn = get_location_table_and_connection()
-
+    location, datum, conn = get_tables_and_connection()
     engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    session = Session()
     focus_texts = []
+    base_query_text = """
+    SELECT 
+            datum.ordinal_date AS odate, 
+            SUM(datum.confirmed) AS conf,
+            SUM(datum.deaths) AS deaths
+        FROM datum, location WHERE 
+    """
 
-    query = session.query(Location)
-
-    # Build the where based on the focuses
+    # Build the location's where based on the focuses
     if focuses[0] is not None:
         focus_texts.append('country == "{}"'.format(focuses[0]))
     if focuses[1] is not None:
@@ -469,18 +439,42 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
         focus_texts.append('admin2 == "{}"'.format(focuses[2]))
 
     if focus_texts:
-        where_clause = ' and '.join(focus_texts)
+        where_clause = ' AND '.join(focus_texts) + ' AND '
+    else:
+        where_clause = ''
 
-        #query = query.filter(text(where_clause))
+    query_tail = """
+        location.jhu_key = datum.location_jhu_key
+    GROUP BY odate ORDER BY odate
+    """
+    query_text = base_query_text + where_clause + query_tail
 
-    #result = query.all()
-    print("Found locations", len(result))
-    location = result[1]
-    print('Country', location.country)
-    print('Admin1', location.admin1)
-    print('Admin2', location.admin2)
-    print('jhu_key', location.jhu_key)
-    sys.exit()
+    # The query result is a generator like object.  We will need to do
+    # a few things that require a list.
+    location_result = list(conn.execute(text(query_text)))
+
+    # Now work on the parent where clause
+    if parent_focus is None:
+        # Nothing left to do.
+        return location_result, None
+
+    if parent_focus == 'Global':
+        where_clause = ''
+    elif parent_level == 'Country':
+        where_clause = 'country = "{}"'.format(parent_focus)
+    elif parent_level == 'State':
+        where_clause = 'admin1 = "{}"'.format(parent_focus)
+    else:
+        sys.exit("Huh? Can't figure out parent")
+
+    # Is is likely that the parent has more (earlier) data than the location.
+    # Only get the parent data from the start of the location's data
+    date_limit_text = "odate >= {} AND ".format(location_result[0][0])
+    query_text = base_query_text + where_clause + ' AND ' + \
+                 date_limit_text + query_tail
+    parent_result = list(conn.execute(text(query_text)))
+
+    return location_result, parent_result
 
 
 def main():
@@ -492,18 +486,19 @@ def main():
 
     parent_level, parent_focus = get_parent_level_focus(args)
 
-    get_data_from_db(focuses, worldwide,
-                     parent_level, parent_focus)
+    location_data, parent_data = get_data_from_db(focuses, worldwide,
+                                                  parent_level, parent_focus)
+    Day.set_data(location_data, parent_data)
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_rolling_average()
 
+    # Use the finest grain focus that was specified
     focus = 'Global'
     for n in range(2, -1, -1):
         if focuses[n] is not None:
             focus = focuses[n]
             break
-    # Use the finest grain focus that was specified
     plot_it(focus, parent_focus)
 
 
