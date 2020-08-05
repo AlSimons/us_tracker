@@ -462,6 +462,7 @@ def get_parent_level_focus(args):
     # No parent display requested.
     return None, None
 
+
 def main():
     args = parse_args()
     columns = define_columns()
