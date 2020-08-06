@@ -10,6 +10,7 @@ from mysql_credentials import username, password
 from datetime import datetime
 
 import csv
+from datetime import datetime
 import os
 import sys
 
@@ -245,6 +246,7 @@ def read_jhu_files(session):
                              os.path.join(JHU_DATA_DIRECTORY, filename),
                              ordinal_date)
     print(datetime.now())
+
 
 def create_database(engine):
     Base.metadata.create_all(engine)
