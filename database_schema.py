@@ -12,11 +12,11 @@ class Location(Base):
     __tablename__ = 'location'
 
     id = Column(Integer, primary_key=True)
-    jhu_key = Column(String, unique=True, nullable=False)
-    country = Column(String, nullable=False)
+    jhu_key = Column(String(80), unique=True, nullable=False)
+    country = Column(String(40), nullable=False)
     fips = Column(Integer)  # US Only: FIPS unique code for a location
-    admin1 = Column(String)  # State / Province
-    admin2 = Column(String)  # County / City
+    admin1 = Column(String(60))  # State / Province
+    admin2 = Column(String(60))  # County / City
     # For now, we'll ignore all the other location information
 
 
@@ -26,7 +26,7 @@ class Datum(Base):
 
     id = Column(Integer, primary_key=True)
     ordinal_date = Column(Integer, nullable=False)
-    location_jhu_key = Column(String, ForeignKey('location.jhu_key'))
+    location_jhu_key = Column(String(80), ForeignKey('location.jhu_key'))
     confirmed = Column(Integer)
     deaths = Column(Integer)
     recovered = Column(Integer)
@@ -45,3 +45,4 @@ class LastDate(Base):
 
     id = Column(Integer, primary_key=True)
     ordinal_date = Column(Integer, nullable=False)
+    date_string = Column(String(10))

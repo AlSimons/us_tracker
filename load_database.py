@@ -6,12 +6,15 @@ from file_handling import get_files, filename_to_ordinal_date, \
     ordinal_date_to_string
 from state_abbreviations import state_abbreviations
 
+from mysql_credentials import username, password
+from datetime import datetime
+
 import csv
 import os
 import sys
 
 
-DATABASE_NAME = 'sqlite:///covid_data.db'
+DATABASE_NAME = 'mysql+mysqlconnector://{}:{}@localhost/covid_data'
 JHU_DATA_DIRECTORY = r'..\COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
 
 
@@ -70,9 +73,11 @@ def update_latest_ordinal_date(session, ordinal_date):
         # This should succeed except for the very first time we process a file.
         last_date = session.query(LastDate).filter(LastDate.ordinal_date).one()
         last_date.ordinal_date = ordinal_date
+        last_date.date_string = ordinal_date_to_string(ordinal_date)
     except NoResultFound:
         last_date = LastDate()
         last_date.ordinal_date = ordinal_date
+        last_date.date_string = ordinal_date_to_string(ordinal_date)
         session.add(last_date)
     session.commit()
 
@@ -172,8 +177,13 @@ def get_location(session, levels, line):
     location.admin1 = admin1
     location.admin2 = admin2
     location.jhu_key = jhu_key
-    if 'FIPS' in line:
-        location.fips = line['FIPS']
+    # Don't try to insert a null string FIPS. sqlite takes it; mysql doesn't.
+    if 'FIPS' in line and line['FIPS']:
+        try:
+            location.fips = int(line['FIPS'])
+        except ValueError:
+            # If the int conversion didn't work, simply skip it.
+            pass
     session.add(location)
     session.commit()
     return location
@@ -230,18 +240,18 @@ def read_jhu_files(session):
         if ordinal_date <= last_ordinal_date_processed:
             continue
 
-        print("Processing", ordinal_date_to_string(ordinal_date))
+        print("Processing", ordinal_date_to_string(ordinal_date), datetime.now())
         process_one_jhu_file(session,
                              os.path.join(JHU_DATA_DIRECTORY, filename),
                              ordinal_date)
-
+    print(datetime.now())
 
 def create_database(engine):
     Base.metadata.create_all(engine)
 
 
 def main():
-    engine = create_engine(DATABASE_NAME, echo=False)
+    engine = create_engine(DATABASE_NAME.format(username, password), echo=False)
     create_database(engine)
 
     Session = sessionmaker(bind=engine)
