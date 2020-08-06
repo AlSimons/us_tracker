@@ -7,6 +7,7 @@ from file_handling import get_files, filename_to_ordinal_date, \
 from state_abbreviations import state_abbreviations
 
 import csv
+from datetime import datetime
 import os
 import sys
 
@@ -230,10 +231,11 @@ def read_jhu_files(session):
         if ordinal_date <= last_ordinal_date_processed:
             continue
 
-        print("Processing", ordinal_date_to_string(ordinal_date))
+        print("Processing", ordinal_date_to_string(ordinal_date), datetime.now())
         process_one_jhu_file(session,
                              os.path.join(JHU_DATA_DIRECTORY, filename),
                              ordinal_date)
+    print(datetime.now())
 
 
 def create_database(engine):
