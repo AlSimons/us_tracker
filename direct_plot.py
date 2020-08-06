@@ -11,20 +11,17 @@ import statistics
 import sys
 
 # Project imports
-from file_handling import get_files
-from database_schema import Base, Location, Datum, LastDate
+from mysql_credentials import username, password
 
 # SQL Alchemy imports
 from sqlalchemy import create_engine, text, MetaData, Table, func, select
-from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.orm.exc import NoResultFound
 
 
 # Number of days to include in the X days rolling average plots
 ROLLING_AVERAGE_DAYS = 7
 
 # Max days to display in the plots
-DISPLAY_DAYS = 60
+DISPLAY_DAYS = 200
 
 # Compare current death count to confirmed cases X days ago to compute death
 # rate percentage, since death usually lags diagnosis. Most important for areas
@@ -32,7 +29,7 @@ DISPLAY_DAYS = 60
 # low death rate.
 DEATHS_LAG = 10
 
-DATABASE_NAME = r'sqlite:///us_tracker\covid_data.db'
+DATABASE_NAME = r'mysql+mysqlconnector://{}:{}@localhost/covid_data'
 POPULATION_FILE = r'us_tracker\populations.csv'
 
 
@@ -322,7 +319,7 @@ def plot_it(focus, parent_focus):
              format(deaths_vel[-1], sign,
                     round(100 * deaths_vel[-1] / deaths[-2], 2)), 'b')
     try:
-        deaths_inc_pct_sign = "-" if deaths_acc[-1] < deaths_acc[-2] else ""
+        deaths_inc_pct_sign = "+" if deaths_acc[-1] > deaths_acc[-2] else ""
         deaths_inc_pct_str = "{}{}%".format(
             deaths_inc_pct_sign, round(
                 100 * (deaths_acc[-1] - deaths_acc[-2]) / deaths_acc[-2], 2))
@@ -330,10 +327,10 @@ def plot_it(focus, parent_focus):
         deaths_inc_pct_str = ""
 
     one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,
-             "{} {} Day Rolling Avg Deaths {}{}".
+             "{} {} Day Rolling Avg Deaths {}".
              format(deaths_acc[-1],
                     min(len(dates), ROLLING_AVERAGE_DAYS),
-                    sign, deaths_inc_pct_str), 'k')
+                    deaths_inc_pct_str), 'k')
     if doing_parents:
         one_plot(dates, deaths_pop, focus, deaths_pop_pos,
                  "{}% of {} deaths{}".
@@ -382,7 +379,8 @@ engine = None
 def get_engine():
     global engine
     if engine is None:
-        engine = create_engine(DATABASE_NAME, echo=False)
+        engine = create_engine(DATABASE_NAME.format(username, password),
+                               echo=False)
     return engine
 
 
@@ -431,11 +429,11 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
 
     # Build the location's where based on the focuses
     if focuses[0] is not None:
-        focus_texts.append('country == "{}"'.format(focuses[0]))
+        focus_texts.append('country = "{}"'.format(focuses[0]))
     if focuses[1] is not None:
-        focus_texts.append('admin1 == "{}"'.format(focuses[1]))
+        focus_texts.append('admin1 = "{}"'.format(focuses[1]))
     if focuses[2] is not None:
-        focus_texts.append('admin2 == "{}"'.format(focuses[2]))
+        focus_texts.append('admin2 = "{}"'.format(focuses[2]))
 
     if focus_texts:
         where_clause = ' AND '.join(focus_texts) + ' AND '
@@ -444,7 +442,7 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
 
     query_tail = """
         location.jhu_key = datum.location_jhu_key
-    GROUP BY odate ORDER BY odate
+    GROUP BY ordinal_date ORDER BY ordinal_date
     """
     query_text = base_query_text + where_clause + query_tail
 
@@ -466,10 +464,13 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     else:
         sys.exit("Huh? Can't figure out parent")
 
+    if where_clause:
+        where_clause += ' AND '
+
     # Is is likely that the parent has more (earlier) data than the location.
     # Only get the parent data from the start of the location's data
-    date_limit_text = "odate >= {} AND ".format(location_result[0][0])
-    query_text = base_query_text + where_clause + ' AND ' + \
+    date_limit_text = "ordinal_date >= {} AND ".format(location_result[0][0])
+    query_text = base_query_text + where_clause + \
                  date_limit_text + query_tail
     parent_result = list(conn.execute(text(query_text)))
 
