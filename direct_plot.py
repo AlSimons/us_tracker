@@ -3,6 +3,7 @@
 # Standard library
 import argparse
 import datetime
+import decimal
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
@@ -323,7 +324,11 @@ def plot_it(focus, parent_focus):
         deaths_inc_pct_str = "{}{}%".format(
             deaths_inc_pct_sign, round(
                 100 * (deaths_acc[-1] - deaths_acc[-2]) / deaths_acc[-2], 2))
-    except ZeroDivisionError:
+    except (ZeroDivisionError, decimal.InvalidOperation):
+        # Stuff coming out of the database (at least under MySQL) are of type
+        # Decimal (not ints). Therefore, we have to take care of its version
+        # of ZeroDivisionError.  Why they didn't use the base ZeroDivisionError
+        # remains a mystery!
         deaths_inc_pct_str = ""
 
     one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,

@@ -1,13 +1,13 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import NoResultFound
 from database_schema import Base, Location, Datum, LastDate
 from file_handling import get_files, filename_to_ordinal_date, \
     ordinal_date_to_string
 from state_abbreviations import state_abbreviations
 
+# Note: NEVER put this file into git!
 from mysql_credentials import username, password
-from datetime import datetime
 
 import csv
 from datetime import datetime
@@ -51,13 +51,13 @@ def process_line(session, levels, line, ordinal_date):
     except(ValueError, KeyError):
         d.incidence_rate = 0.0
     try:
-        d.case_fatality_ration = line['Case-Fatality_Ratio']
+        d.case_fatality_ratio = float(line['Case-Fatality_Ratio'])
     except (ValueError, KeyError):
-        d.case_fatality_ration = 0.0
+        d.case_fatality_ratio = 0.0
 
     location.data.append(d)
 
-    session.commit()
+    # Commit is performed after each file is processed, not per-line.
 
 
 def update_latest_ordinal_date(session, ordinal_date):
@@ -222,6 +222,10 @@ def process_one_jhu_file(session, filepath, ordinal_date):
     # After the file is completed, update the latest ordinal_date_processed.
     update_latest_ordinal_date(session, ordinal_date)
 
+    # Commit all the changes from this file.  Avoids partial loads if the
+    # program is interrupted during a file.
+    session.commit()
+
 
 def read_jhu_files(session):
     # Get the files to process
@@ -241,11 +245,14 @@ def read_jhu_files(session):
         if ordinal_date <= last_ordinal_date_processed:
             continue
 
-        print("Processing", ordinal_date_to_string(ordinal_date), datetime.now())
+        # The [:-7] on the datetime.now() strips off the microseconds
+        print("Processing", ordinal_date_to_string(ordinal_date),
+              str(datetime.now())[:-7])
+        # clean_partial_load(ordinal_date)
         process_one_jhu_file(session,
                              os.path.join(JHU_DATA_DIRECTORY, filename),
                              ordinal_date)
-    print(datetime.now())
+    print(str(datetime.now())[:-7])
 
 
 def create_database(engine):
