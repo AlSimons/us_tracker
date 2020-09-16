@@ -7,6 +7,10 @@ import pandas as pd
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        '-c', '--countries', action='store_true',
+        help="Compare countries instead of states"
+    )
+    parser.add_argument(
         '-d', '--days', type=int, default=7,
         help="Number of days (D) to use with --percent-increase and "
              "--increase. Default=7.")
@@ -37,6 +41,10 @@ def parse_args():
         help="Use population-adjusted data (cases per-10k people")
     args = parser.parse_args()
 
+    if args.countries and args.percent_increase:
+        parser.error(
+            "--countries and --percent-increase are mutually exlusive."
+        )
     if args.percent_increase and args.increase_count:
         parser.error(
             "--increase-count --and percent-increase are mutually exclusive.")
@@ -46,36 +54,51 @@ def parse_args():
 def get_covid_data(args):
     # Read in the CSV
     if args.deaths:
-        file_name = \
-            r'csse_covid_19_time_series\time_series_covid19_deaths_US.csv'
+        if args.countries:
+            file_name = \
+                r'csse_covid_19_time_series\time_series_covid19_deaths_global.csv'
+        else:
+            file_name = \
+                r'csse_covid_19_time_series\time_series_covid19_deaths_US.csv'
     else:
-        file_name = \
-            r'csse_covid_19_time_series\time_series_covid19_confirmed_US.csv'
+        if args.countries:
+            file_name = \
+                r'csse_covid_19_time_series\time_series_covid19_confirmed_global.csv'
+        else:
+            file_name = \
+                r'csse_covid_19_time_series\time_series_covid19_confirmed_US.csv'
     covid_data = pd.read_csv(file_name, index_col=6)
     # print("Initial", covid_data.shape)
 
     # Get rid of all the unneeded columns (all those not in the time series)
-    covid_data = covid_data.drop(
-        ['UID', 'iso2', 'iso3', 'code3', 'FIPS', 'Country_Region',
-         'Lat', 'Long_', 'Combined_Key', 'Admin2'], axis=1)
+    if args.countries:
+        covid_data = covid_data.drop(['Lat', 'Long', 'Province/State'], axis=1)
+    else:
+        covid_data = covid_data.drop(
+            ['UID', 'iso2', 'iso3', 'code3', 'FIPS', 'Country_Region',
+             'Lat', 'Long_', 'Combined_Key', 'Admin2'], axis=1)
     # print("Dropped columns", covid_data.shape)
 
     # The deaths time series file also has a Population column/
-    if args.deaths:
+    if args.deaths and not args.countries:
         covid_data = covid_data.drop(['Population'], axis=1)
 
     # Drop the non-states, except for DC and Puerto Rico
-    covid_data.drop(
-        ['American Samoa', 'Diamond Princess', 'Grand Princess', 'Guam',
-         'Northern Mariana Islands', 'Virgin Islands'], inplace=True)
-    print("Dropped non-states", covid_data.shape)
+    if not args.countries:
+        covid_data.drop(
+            ['American Samoa', 'Diamond Princess', 'Grand Princess', 'Guam',
+             'Northern Mariana Islands', 'Virgin Islands'], inplace=True)
+        print("Dropped non-states", covid_data.shape)
 
     # Get rid of data before March.  Mostly zero.
     covid_data.drop([x for x in covid_data.columns if x < "3/1"], axis=1,
                     inplace=True)
 
     # Add up all the entries for a state / territory
-    covid_data = covid_data.groupby('Province_State').agg(['sum'])
+    if args.countries:
+        covid_data = covid_data.groupby('Country/Region').agg(['sum'])
+    else:
+        covid_data = covid_data.groupby('Province_State').agg(['sum'])
     # print("After aggregation", covid_data.shape)
 
     # Simplify the column names

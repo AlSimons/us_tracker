@@ -5,9 +5,6 @@ import argparse
 import datetime
 import decimal
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import os
-import re
 import statistics
 import sys
 
@@ -15,14 +12,14 @@ import sys
 from mysql_credentials import username, password
 
 # SQL Alchemy imports
-from sqlalchemy import create_engine, text, MetaData, Table, func, select
+from sqlalchemy import create_engine, text, MetaData, Table
 
 
 # Number of days to include in the X days rolling average plots
 ROLLING_AVERAGE_DAYS = 7
 
 # Max days to display in the plots
-DISPLAY_DAYS = 200
+DISPLAY_DAYS = 250
 
 # Compare current death count to confirmed cases X days ago to compute death
 # rate percentage, since death usually lags diagnosis. Most important for areas
@@ -50,7 +47,7 @@ class Day:
 
     def __init__(self, date,
                  conf_num, deaths_num,
-                 parent_conf_num = 0, parent_deaths_num = 0):
+                 parent_conf_num=0, parent_deaths_num=0):
         self.date = date
         Day.all_days.append(self)
         Day.day_hash[date] = self
@@ -66,12 +63,53 @@ class Day:
         Day.columns = _columns
 
     @staticmethod
+    def fixup_missing_location_data(location_data, parent_data):
+        # Sometimes data are incomplete, for instance, New York City has
+        # data for four days, and then not for 16, and then solid. So if
+        # the lists are different, find out where the data becomes solid,
+        # and discard the data before the gap.  Also print how much data
+        # we trashed.  We assume that the parent is always more complete.
+        # Check, but only fix when the location is incomplete. Error out
+        # if the parent list is shorter than the location.
+        if len(location_data) > len(parent_data):
+            sys.exit("Parent data is shorter than location data.")
+
+        loc_dates = [x[0] for x in location_data]
+
+        start_of_solid_data = 0
+        for n in range(1, len(loc_dates)):
+            if loc_dates[n] != loc_dates[n - 1] + 1:
+                start_of_solid_data = n
+
+        if start_of_solid_data == 0:
+            sys.exit("Search for start of solid data failed.")
+        print("Gap in location data caused us to drop {} points.".
+              format(start_of_solid_data))
+        first_good_date = loc_dates[start_of_solid_data]
+        print("Starting at {}".format(
+            ordinal_date_to_string(first_good_date)
+        ))
+
+        # Now fix up the two lists:
+        location_data = location_data[start_of_solid_data:]
+        parent_data = parent_data[-len(location_data):]
+
+        # Now they must be the same length.  Make sure they represent the
+        # same dates.
+        for n in range(len(location_data)):
+            if location_data[n][0] != parent_data[n][0]:
+                print(n, location_data[n][0], parent_data[n][0])
+                sys.exit("Dates don't match up. More debugging needed")
+        return location_data, parent_data
+
+    @staticmethod
     def set_data(location_data, parent_data):
         # Sanity check, since we're going to walk the two result lists
         # in parallel.
         if parent_data is not None and len(location_data) != len(parent_data):
-            sys.exit("How are the lengths of the two results different: {} {}?". \
-                     format(len(location_data), len(parent_data)))
+            location_data, parent_data = Day.fixup_missing_location_data(
+                location_data, parent_data)
+
         for n in range(len(location_data)):
             # OK, let's create days!
             if parent_data is not None:
@@ -293,14 +331,19 @@ def plot_it(focus, parent_focus):
                     round(100 * conf_vel[-1] / conf_num[-2], 2)),
              'y')
     sign = "+" if conf_accel[-1] > conf_accel[-2] else ""
+    if conf_accel[-2] != 0:
+        inc_pct_str = "{}{}%". \
+            format(sign,
+                   round(100 *
+                         (conf_accel[-1] - conf_accel[-2]) / conf_accel[-2],
+                         2))
+    else:
+        inc_pct_str = ""
     one_plot(dates, conf_accel, focus, conf_roll_avg_pos,
-             "{:,} {} Day Avg New Cases {}{}%".
+             "{:,} {} Day Avg New Cases {}".
              format(conf_accel[-1],
                     min(len(dates), ROLLING_AVERAGE_DAYS),
-                    sign,
-                    round(100 *
-                          (conf_accel[-1] - conf_accel[-2]) / conf_accel[-2],
-                          2)), 'k')
+                    inc_pct_str), 'k')
     if doing_parents:
         one_plot(dates, conf_pop, focus, conf_pop_pos,
                  "{}% of {} cases{}".
@@ -315,10 +358,11 @@ def plot_it(focus, parent_focus):
     except IndexError:
         print("No data found for {}".format(focus))
         sys.exit()
-    sign = "+" if deaths_vel[-1] > deaths_vel[-2] else ""
+    sign = "+" if deaths[-1] > deaths[-2] else ""
     one_plot(dates, deaths_vel, focus, deaths_daily_pos, "{:,} Daily New Deaths {}{}%".
              format(deaths_vel[-1], sign,
-                    round(100 * deaths_vel[-1] / deaths[-2], 2)), 'b')
+                    round(100 *
+                          (deaths[-1] - deaths[-2]) / deaths[-2], 2)), 'b')
     try:
         deaths_inc_pct_sign = "+" if deaths_acc[-1] > deaths_acc[-2] else ""
         deaths_inc_pct_str = "{}{}%".format(

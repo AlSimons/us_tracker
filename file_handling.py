@@ -34,8 +34,14 @@ def ordinal_date_to_string(ordinal):
 
 
 def main():
-    for ord_date in sys.argv[1:]:
-        print(ord_date, ordinal_date_to_string(int(ord_date)))
+    if sys.argv[1] == 'from':
+        for ord_date in sys.argv[2:]:
+            print(ord_date, ordinal_date_to_string(int(ord_date)))
+    elif sys.argv[1] == 'to':
+        for date_string in sys.argv[2:]:
+            print(filename_to_ordinal_date(date_string + ".csv"))
+    else:
+        print("First arg must be either 'from' or 'to'", file=sys.stderr)
 
 
 if __name__ == '__main__':
