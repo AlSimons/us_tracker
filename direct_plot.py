@@ -9,23 +9,11 @@ import statistics
 import sys
 
 # Project imports
+from groups import groups
 from mysql_credentials import username, password
 
 # SQL Alchemy imports
 from sqlalchemy import create_engine, text, MetaData, Table
-
-
-# Number of days to include in the X days rolling average plots
-ROLLING_AVERAGE_DAYS = 7
-
-# Max days to display in the plots
-DISPLAY_DAYS = 250
-
-# Compare current death count to confirmed cases X days ago to compute death
-# rate percentage, since death usually lags diagnosis. Most important for areas
-# with rapidly increasing case loads, which would otherwise show an artificially
-# low death rate.
-DEATHS_LAG = 10
 
 DATABASE_NAME = r'mysql+mysqlconnector://{}:{}@localhost/covid_data'
 POPULATION_FILE = r'us_tracker\populations.csv'
@@ -63,50 +51,89 @@ class Day:
         Day.columns = _columns
 
     @staticmethod
-    def fixup_missing_location_data(location_data, parent_data):
-        # Sometimes data are incomplete, for instance, New York City has
-        # data for four days, and then not for 16, and then solid. So if
-        # the lists are different, find out where the data becomes solid,
-        # and discard the data before the gap.  Also print how much data
-        # we trashed.  We assume that the parent is always more complete.
-        # Check, but only fix when the location is incomplete. Error out
-        # if the parent list is shorter than the location.
-        if len(location_data) > len(parent_data):
-            sys.exit("Parent data is shorter than location data.")
+    def fill_data_list(data_list):
+        """
+        One of the data lists [(date, cases, deaths),...] has missing dates.
+        Fill in with the previous days data.
+        :param data_list: List of triples, (ordinal_date, cases, deaths)
+        :return: A new filled in list.
+        """
+        # Now walk the lists.  If a date is missing in either, add an item with
+        # the previous day's data. Since we're messing with the list, we can't
+        # simply walk over range(len()). The simplest way around this is to
+        # create two new lists, appending as we go: new_ld for location data,
+        # new_pd for parent data.
+        filled_list = []
+        prev_date = data_list[0][0] - 1
+        prev_cases = 0
+        prev_deaths = 0
+        for datum in data_list:
+            if datum[0] != prev_date + 1:
+                # Need to add some elements
+                for ordinal_date in range(prev_date + 1, datum[0]):
+                    filled_list.append((ordinal_date, prev_cases, prev_deaths))
 
-        loc_dates = [x[0] for x in location_data]
+            # Now OK to continue
+            filled_list.append(datum)
+            prev_date = datum[0]
+            prev_cases = datum[1]
+            prev_deaths = datum[2]
 
-        start_of_solid_data = 0
-        for n in range(1, len(loc_dates)):
-            if loc_dates[n] != loc_dates[n - 1] + 1:
-                start_of_solid_data = n
+        return filled_list
 
-        if start_of_solid_data == 0:
-            sys.exit("Search for start of solid data failed.")
-        print("Gap in location data caused us to drop {} points.".
-              format(start_of_solid_data))
-        first_good_date = loc_dates[start_of_solid_data]
-        print("Starting at {}".format(
-            ordinal_date_to_string(first_good_date)
-        ))
+    @staticmethod
+    def fixup_missing_location_data(location_data: list, parent_data: list) -> \
+            (list, list):
+        """Sometimes data are incomplete, for instance, New York City has
+        data for four days, and then not for 16, and then solid. Where there
+        are missing data, fill in with the previous day's data.
+        :param location_data: A list of triples (ordinal_day, cases, deaths).
+        :param parent_data: Same for the parent.
+        :return A collection of two repaired lists, of the same triples.
+        """
+        # First ensure that the lists start on the same day.  If the parent
+        # list starts after the location list, something is bad wrong. Bail
+        # so we can see when it happens and debug it.
+        location_first_date = location_data[0][0]
+        if location_first_date != parent_data[0][0]:
+            if location_first_date < parent_data[0][0]:
+                sys.exit("Error. Location data earlier than parent data.")
+            for n in range(len(parent_data)):
+                if location_first_date > parent_data[n][0]:
+                    continue
+                # Nuance: It should not be possible for a parent to be missing
+                # a date that a location has.
+                if location_first_date != parent_data[n][0]:
+                    sys.exit("Parent_data doesn't contain location data.")
+                # Truncate the parent data to start at the start of the
+                # location data.
+                parent_data = parent_data[n:]
+                break
 
-        # Now fix up the two lists:
-        location_data = location_data[start_of_solid_data:]
-        parent_data = parent_data[-len(location_data):]
+        # Sanity check.  They should end on the same date.
+        if location_data[-1][0] != parent_data[-1][0]:
+            sys.exit("Location and parent_data don't end on the same date")
+        # Note! Their lengths are likely not equal at this point, but
+        # the parent data list should not be shorter.
+        if len(parent_data) < len(location_data):
+            sys.exit("The parent data list is shorter than loc data.")
+        # Phew!
+        location_data = Day.fill_data_list(location_data)
+        parent_data = Day.fill_data_list(parent_data)
 
-        # Now they must be the same length.  Make sure they represent the
-        # same dates.
-        for n in range(len(location_data)):
-            if location_data[n][0] != parent_data[n][0]:
-                print(n, location_data[n][0], parent_data[n][0])
-                sys.exit("Dates don't match up. More debugging needed")
+        # NOW the lists should be the same length!
+        if len(location_data) != len(parent_data):
+            sys.exit("Lists are not the same length after filling.")
         return location_data, parent_data
 
     @staticmethod
     def set_data(location_data, parent_data):
         # Sanity check, since we're going to walk the two result lists
         # in parallel.
-        if parent_data is not None and len(location_data) != len(parent_data):
+        if parent_data is not None and (
+                len(location_data) != len(parent_data) or
+                location_data[0][0] != parent_data[0][0] or
+                location_data[-1][0] != parent_data[-1][0]):
             location_data, parent_data = Day.fixup_missing_location_data(
                 location_data, parent_data)
 
@@ -176,7 +203,7 @@ class Day:
 
                     setattr(day, column.field,
                             round(statistics.mean(
-                                Day.past_accelerations[-ROLLING_AVERAGE_DAYS:]),
+                                Day.past_accelerations[-args.days:]),
                                 2))
 
     def __str__(self):
@@ -188,7 +215,11 @@ class Day:
         return out
 
 
+args = None
+
+
 def parse_args():
+    global args
     parser = argparse.ArgumentParser()
     parser.add_argument('-1', '--admin1',
                         help="Specify admin-1 level group (e.g., country)")
@@ -198,6 +229,17 @@ def parse_args():
     parser.add_argument(
         '-3', '--admin3',
         help="Specify admin-3 level group (e.g., city / county)")
+    parser.add_argument('-d', '--days', type=int, default=7,
+                        help="Number of days for rolling averages [7]")
+    parser.add_argument('-D', '--display-days', type=int, default=365,
+                        help="Number of days to display [365]")
+    parser.add_argument('-g', '--use-groups', action='store_true',
+                        help='Plot a group of entities, e.g., Europe')
+    parser.add_argument('-G', '--group-name', type=str,
+                        help="Name for a groups of entities, e.g., Europe")
+    parser.add_argument('-l', '--death-lag', type=int, default=10,
+                        help="Number of days to skew the death stats when "
+                             "determining death rate. [10]")
     parser.add_argument('--parent-1',
                         help="Country to use for percentage computation")
     parser.add_argument('--parent-2',
@@ -205,6 +247,8 @@ def parse_args():
     parser.add_argument('--parent-global', action="store_true",
                         help="Compute percentage of global cases.")
     args = parser.parse_args()
+    if args.use_groups and not args.group_name:
+        parser.error("Using --use-groups requires using --group-name")
     return args
 
 
@@ -233,7 +277,10 @@ def define_columns():
 
 def one_plot(dates, values, focus, position, title, color):
     plt.subplot(position)
-    plt.title(focus + " " + title)
+    if type(focus) == str:
+        plt.title(focus + " " + title)
+    else:
+        plt.title(args.group_name + " " + title)
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
     #### plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
@@ -258,7 +305,7 @@ def plot_it(focus, parent_focus):
 
     doing_parents = Day.all_days[-1].parent_conf_num > 0
 
-    for day in Day.all_days[-DISPLAY_DAYS:]:
+    for day in Day.all_days[-args.display_days:]:
         dates.append(day.date)
         conf_num.append(day.conf_num)
         conf_vel.append(day.daily_conf)
@@ -308,8 +355,12 @@ def plot_it(focus, parent_focus):
         else:
             percent_of_parent_pop_str = ""
 
+    if type(focus) == str:
+        focus_for_title = focus
+    else:
+        focus_for_title = args.group_name
     plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days)'.
-               format(focus, len(dates)))
+               format(focus_for_title, len(dates)))
     plt.subplots_adjust(hspace=.27, wspace=.16,
                         top=.97, bottom=.07,
                         left=.06, right=.97)
@@ -342,7 +393,7 @@ def plot_it(focus, parent_focus):
     one_plot(dates, conf_accel, focus, conf_roll_avg_pos,
              "{:,} {} Day Avg New Cases {}".
              format(conf_accel[-1],
-                    min(len(dates), ROLLING_AVERAGE_DAYS),
+                    min(len(dates), args.days),
                     inc_pct_str), 'k')
     if doing_parents:
         one_plot(dates, conf_pop, focus, conf_pop_pos,
@@ -353,7 +404,7 @@ def plot_it(focus, parent_focus):
         one_plot(dates, deaths, focus, deaths_num_pos, "{:,} Deaths Cumulative: {}%".
                  format(deaths[-1],
                         round((deaths[-1] /
-                               conf_num[-(DEATHS_LAG + 1)]) * 100, 1)),
+                               conf_num[-(args.death_lag + 1)]) * 100, 1)),
                  'r')
     except IndexError:
         print("No data found for {}".format(focus))
@@ -378,7 +429,7 @@ def plot_it(focus, parent_focus):
     one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,
              "{} {} Day Rolling Avg Deaths {}".
              format(deaths_acc[-1],
-                    min(len(dates), ROLLING_AVERAGE_DAYS),
+                    min(len(dates), args.days),
                     deaths_inc_pct_str), 'k')
     if doing_parents:
         one_plot(dates, deaths_pop, focus, deaths_pop_pos,
@@ -388,25 +439,34 @@ def plot_it(focus, parent_focus):
     plt.show()
 
 
-def get_level_focus(args):
+def get_level_focus():
     focuses = [None, None, None]
     worldwide = True
     if args.admin1:
         # Summarize a country
-        focuses[0] = args.admin1
+        if args.use_groups and args.admin1 in groups['admin1']:
+            focuses[0] = groups['admin1'][args.admin1]
+        else:
+            focuses[0] = args.admin1
         worldwide = False
     if args.admin2:
         # Summarize a state / province
-        focuses[1] = args.admin2
+        if args.use_groups and args.admin2 in groups['admin2']:
+            focuses[1] = groups['admin2'][args.admin2]
+        else:
+            focuses[1] = args.admin2
         worldwide = False
     if args.admin3:
         # Summarize a city / county
-        focuses[2] = args.admin3
+        if args.use_groups and args.admin3 in groups['admin3']:
+            focuses[2] = groups['admin3'][args.admin3]
+        else:
+            focuses[2] = args.admin3
         worldwide = False
     return worldwide, focuses
 
 
-def get_parent_level_focus(args):
+def get_parent_level_focus():
     if args.parent_global:
         return None, 'Global'
 
@@ -453,6 +513,18 @@ def ordinal_date_to_string(ordinal, mmdd=False):
     return date_string
 
 
+def build_focus_where_clause(field, focus):
+    if type(focus) == str:
+        clause = '{} = "{}"'.format(field, focus)
+    else:
+        for n in range(len(focus)):
+            # Have to wrap the strings in quotes for SQL
+            focus[n] = '"' + focus[n] + '"'
+        clause = '{} in ({})'.format(field, ', '.join(focus))
+
+    return clause
+
+
 def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     """
     First we get a list of all the jhu_keys in the requested focus.
@@ -478,11 +550,14 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
 
     # Build the location's where based on the focuses
     if focuses[0] is not None:
-        focus_texts.append('country = "{}"'.format(focuses[0]))
+        focus_where = build_focus_where_clause('country', focuses[0])
+        focus_texts.append(focus_where)
     if focuses[1] is not None:
-        focus_texts.append('admin1 = "{}"'.format(focuses[1]))
+        focus_where = build_focus_where_clause('admin1', focuses[1])
+        focus_texts.append(focus_where)
     if focuses[2] is not None:
-        focus_texts.append('admin2 = "{}"'.format(focuses[2]))
+        focus_where = build_focus_where_clause('admin2', focuses[2])
+        focus_texts.append(focus_where)
 
     if focus_texts:
         where_clause = ' AND '.join(focus_texts) + ' AND '
@@ -527,13 +602,13 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
 
 
 def main():
-    args = parse_args()
+    parse_args()
     columns = define_columns()
     Day.set_columns(columns)
 
-    worldwide, focuses = get_level_focus(args)
+    worldwide, focuses = get_level_focus()
 
-    parent_level, parent_focus = get_parent_level_focus(args)
+    parent_level, parent_focus = get_parent_level_focus()
 
     location_data, parent_data = get_data_from_db(focuses, worldwide,
                                                   parent_level, parent_focus)

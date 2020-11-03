@@ -4,3 +4,4 @@ __pycache__
 *.db
 *.db-journal
 mysql_credentials.py
+updated_files.txt

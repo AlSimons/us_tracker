@@ -51,6 +51,13 @@ def parse_args():
     return args
 
 
+def simplify_column_dates(d):
+    parts = d.split('/')
+    month = '{:02d}'.format(int(parts[0]))
+    day = '{:02d}'.format(int(parts[1]))
+    return '/'.join([month, day])
+
+
 def get_covid_data(args):
     # Read in the CSV
     if args.deaths:
@@ -90,8 +97,12 @@ def get_covid_data(args):
              'Northern Mariana Islands', 'Virgin Islands'], inplace=True)
         print("Dropped non-states", covid_data.shape)
 
+    # Simplify the column names
+    covid_data.columns = [simplify_column_dates(x)
+                          for x in covid_data.columns]
+
     # Get rid of data before March.  Mostly zero.
-    covid_data.drop([x for x in covid_data.columns if x < "3/1"], axis=1,
+    covid_data.drop([x for x in covid_data.columns if x < "03/01"], axis=1,
                     inplace=True)
 
     # Add up all the entries for a state / territory
@@ -100,10 +111,6 @@ def get_covid_data(args):
     else:
         covid_data = covid_data.groupby('Province_State').agg(['sum'])
     # print("After aggregation", covid_data.shape)
-
-    # Simplify the column names
-    covid_data.columns = ['/'.join(x[0].split('/')[:2])
-                          for x in covid_data.columns]
 
     return covid_data
 

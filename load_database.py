@@ -9,6 +9,7 @@ from state_abbreviations import state_abbreviations
 # Note: NEVER put this file into git!
 from mysql_credentials import username, password
 
+import argparse
 import csv
 from datetime import datetime
 import os
@@ -18,9 +19,20 @@ import sys
 DATABASE_NAME = 'mysql+mysqlconnector://{}:{}@localhost/covid_data'
 JHU_DATA_DIRECTORY = r'..\COVID-19\csse_covid_19_data\csse_covid_19_daily_reports'
 
+args = None
+
+
+def parse_args():
+    global args
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--load-missing-files', action='store_true',
+                        help="Refill JHU data that have been removed due to "
+                             "an update.")
+
+    args = parser.parse_args()
+
 
 def process_line(session, levels, line, ordinal_date):
-
     # First get the location record.
     location = get_location(session, levels, line)
 
@@ -35,7 +47,9 @@ def process_line(session, levels, line, ordinal_date):
     except ValueError:
         d.confirmed = 0
     try:
-        d.deaths = int(line['Deaths'])
+        # Arrgh.  Consistency, folks.  10-28-20 has Deaths as a float. I
+        # guess part of a person died somewhere.
+        d.deaths = int(float(line['Deaths']))
     except ValueError:
         d.deaths = 0
     try:
@@ -227,6 +241,11 @@ def process_one_jhu_file(session, filepath, ordinal_date):
     session.commit()
 
 
+def date_is_missing_data(session, ordinal_date):
+    count = session.query(Datum). \
+        filter(Datum.ordinal_date == ordinal_date).count()
+    return count == 0
+
 def read_jhu_files(session):
     # Get the files to process
     files = get_files(JHU_DATA_DIRECTORY)
@@ -243,7 +262,10 @@ def read_jhu_files(session):
         ordinal_date = filename_to_ordinal_date(filename)
         # Have we already processed this one?
         if ordinal_date <= last_ordinal_date_processed:
-            continue
+            if not args.load_missing_files:
+                continue
+            if not date_is_missing_data(session, ordinal_date):
+                continue
 
         # The [:-7] on the datetime.now() strips off the microseconds
         print("Processing", ordinal_date_to_string(ordinal_date),
@@ -260,6 +282,7 @@ def create_database(engine):
 
 
 def main():
+    parse_args()
     engine = create_engine(DATABASE_NAME.format(username, password), echo=False)
     create_database(engine)
 
