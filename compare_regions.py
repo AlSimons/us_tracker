@@ -53,6 +53,8 @@ def parse_args():
 
 def simplify_column_dates(d):
     parts = d.split('/')
+    if parts[0] == 'Country':
+        return d
     month = '{:02d}'.format(int(parts[0]))
     day = '{:02d}'.format(int(parts[1]))
     return '/'.join([month, day])

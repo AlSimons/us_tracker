@@ -5,6 +5,7 @@ import argparse
 import datetime
 import decimal
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import statistics
 import sys
 
@@ -140,11 +141,11 @@ class Day:
         for n in range(len(location_data)):
             # OK, let's create days!
             if parent_data is not None:
-                Day(ordinal_date_to_string(location_data[n][0], True),
+                Day(ordinal_date_to_string(location_data[n][0]),
                     location_data[n][1], location_data[n][2],
                     parent_data[n][1], parent_data[n][2])
             else:
-                Day(ordinal_date_to_string(location_data[n][0], True),
+                Day(ordinal_date_to_string(location_data[n][0]),
                     location_data[n][1], location_data[n][2])
 
     def compute_vel_acc(self, prev, dependence_type):
@@ -283,9 +284,9 @@ def one_plot(dates, values, focus, position, title, color):
         plt.title(args.group_name + " " + title)
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
-    #### plt.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY))
+    plt.gca().xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY, interval=2))
     # Format x-tick labels as 3-letter month name and day number
-    #### plt.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'));
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'));
     plt.plot(dates, values, color + '-')
     axes = plt.gca()
     axes.set_ylim(bottom=0)
@@ -506,10 +507,13 @@ def get_tables_and_connection():
     return location_table, datum_table, eng
 
 
-def ordinal_date_to_string(ordinal, mmdd=False):
+def ordinal_date_to_string(ordinal, to_dt=True):
+    fo = datetime.datetime.fromordinal(ordinal).date()
     date_string = str(datetime.datetime.fromordinal(ordinal).date())
-    if mmdd:
-        date_string = date_string[5:]
+    if to_dt:
+        dt = datetime.datetime.strptime(date_string, '%Y-%m-%d')
+        return dt
+    # If just the string was wanted...
     return date_string
 
 

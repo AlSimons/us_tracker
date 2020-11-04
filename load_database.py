@@ -34,7 +34,14 @@ def parse_args():
 
 def process_line(session, levels, line, ordinal_date):
     # First get the location record.
-    location = get_location(session, levels, line)
+    try:
+        location = get_location(session, levels, line)
+    except IndexError as e:
+        print("Exception encountered in processing input line.", file=sys.stderr)
+        print("The line was\n   ", line, file=sys.stderr)
+        print("The exception was\n   ", e, file=sys.stderr)
+        # Skip further processing of this line
+        return
 
     # Now get the rest of the information from the line.
     # We know that this one will be unique, so construct the record from
