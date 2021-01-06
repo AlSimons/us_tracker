@@ -114,6 +114,9 @@ def get_covid_data(args):
         covid_data = covid_data.groupby('Province_State').agg(['sum'])
     # print("After aggregation", covid_data.shape)
 
+    # That step changed the column headers from [date, date, ...]
+    # to [(date, "sum"), (date, "sum").  Return to simply dates.
+    covid_data.columns = [x[0] for x in covid_data.columns]
     return covid_data
 
 
@@ -197,8 +200,12 @@ def plot(covid_data, args):
 
     title = "BUG: Didn't set the title"
 
+    if args.lowest:
+        ascending = True
+    else:
+        ascending = False
     covid_data = covid_data.sort_values(by=covid_data.columns[-1],
-                                        ascending=False)
+                                        ascending=ascending)
 
     # To rank by PERCENT increase
     if args.percent_increase:
@@ -216,10 +223,7 @@ def plot(covid_data, args):
     else:
         title = "Highest {}{}count".format(adjusted, count_type)
 
-    if args.lowest:
-        covid_data = covid_data.iloc[-args.num_states:]
-    else:
-        covid_data = covid_data.iloc[:args.num_states]
+    covid_data = covid_data.iloc[:args.num_states]
 
     # It seems that pandas time series plotting wants the states as columns
     # and the time series points as indexes.

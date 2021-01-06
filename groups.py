@@ -12,7 +12,7 @@ groups = {"admin1": {
                   "Kazakhstan", "Kosovo",
                   "Latvia", "Liechtenstein", "Lithuania", "Luxembourg",
                   "Malta", "Moldova", "Monaco", "Montenegro",
-                  "Netherlands", "North Macedonia", "Norway"
+                  "Netherlands", "North Macedonia", "Norway",
                   "Poland", "Portugal",
                   "Romania", "Russia",
                   "San Marino", "Serbia", "Slovakia", "Slovenia", "Spain",

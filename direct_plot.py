@@ -230,6 +230,8 @@ def parse_args():
     parser.add_argument(
         '-3', '--admin3',
         help="Specify admin-3 level group (e.g., city / county)")
+    parser.add_argument('-a', '--active-cases', action='store_true',
+                        help="Display active cases instead of confirmed cases.")
     parser.add_argument('-d', '--days', type=int, default=7,
                         help="Number of days for rolling averages [7]")
     parser.add_argument('-D', '--display-days', type=int, default=365,
@@ -247,6 +249,9 @@ def parse_args():
                         help="State to use for percentage computation")
     parser.add_argument('--parent-global', action="store_true",
                         help="Compute percentage of global cases.")
+    parser.add_argument('-s', '--smooth-data', action='store_true',
+                        help="Smooth data spikes caused by missing a day's"
+                             "data")
     args = parser.parse_args()
     if args.use_groups and not args.group_name:
         parser.error("Using --use-groups requires using --group-name")
@@ -254,14 +259,28 @@ def parse_args():
 
 
 def get_population(focus):
+    if type(focus) == str:
+        focus = [focus]
+    population = 0
+    found = set()
     with open(POPULATION_FILE) as f:
         for line in f:
             parts = line.strip().split(',')
-            if parts and parts[0] == focus:
-                return int(parts[1])
+            if parts and parts[0] in focus:
+                population += int(parts[1])
+                found.add(parts[0])
+    # Now report the populations we were not able to find.
+    header_out = False
+    for place in focus:
+        if place not in found:
+            if not header_out:
+                print("Population(s) not found:")
+                header_out = True
+            print("   ", place)
+
     # Use zero as the "no data" flag, since no entity will have a population
     # of zero
-    return 0
+    return population
 
 
 def define_columns():
@@ -284,7 +303,8 @@ def one_plot(dates, values, focus, position, title, color):
         plt.title(args.group_name + " " + title)
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
-    plt.gca().xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MONDAY, interval=2))
+    plt.gca().xaxis.set_major_locator(
+        mdates.WeekdayLocator(byweekday=mdates.MONDAY, interval=2))
     # Format x-tick labels as 3-letter month name and day number
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'));
     plt.plot(dates, values, color + '-')
@@ -360,8 +380,8 @@ def plot_it(focus, parent_focus):
         focus_for_title = focus
     else:
         focus_for_title = args.group_name
-    plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days)'.
-               format(focus_for_title, len(dates)))
+    plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days) Pop: {:,}'.
+               format(focus_for_title, len(dates), focus_population))
     plt.subplots_adjust(hspace=.27, wspace=.16,
                         top=.97, bottom=.07,
                         left=.06, right=.97)
@@ -372,8 +392,12 @@ def plot_it(focus, parent_focus):
     else:
         confirmed_percentage = ""
 
-    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} Confirmed Cases {}".
-             format(conf_num[-1], confirmed_percentage), 'g')
+    if args.active_cases:
+        case_type = "Active"
+    else:
+        case_type = "Confirmed"
+    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} {}} Cases {}".
+             format(conf_num[-1], case_type, confirmed_percentage), 'g')
     # The number will print with a minus sign if < 0, so we only need to
     # add the "+" if >= 0.
     sign = "+" if conf_vel[-1] > 0 else ""
@@ -428,7 +452,7 @@ def plot_it(focus, parent_focus):
         deaths_inc_pct_str = ""
 
     one_plot(dates, deaths_acc, focus, deaths_roll_avg_pos,
-             "{} {} Day Rolling Avg Deaths {}".
+             "{} {} Day Avg Deaths {}".
              format(deaths_acc[-1],
                     min(len(dates), args.days),
                     deaths_inc_pct_str), 'k')
@@ -521,10 +545,11 @@ def build_focus_where_clause(field, focus):
     if type(focus) == str:
         clause = '{} = "{}"'.format(field, focus)
     else:
+        wrapped_focus = []
         for n in range(len(focus)):
             # Have to wrap the strings in quotes for SQL
-            focus[n] = '"' + focus[n] + '"'
-        clause = '{} in ({})'.format(field, ', '.join(focus))
+            wrapped_focus.append('"' + focus[n] + '"')
+        clause = '{} in ({})'.format(field, ', '.join(wrapped_focus))
 
     return clause
 
@@ -605,6 +630,44 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     return location_result, parent_result
 
 
+def smooth_data(data):
+    """
+    Sometimes a location will miss an update; presumably it arrives at JHU too
+    late to be included in the day's report.  So the location will show zero
+    increase, but the next day will show two day's increase.  Try to smooth this
+    out by assigning half the increase to "missing" day.
+
+    Our first attempt at this is to look at four day windows, where the second
+    and third days have the same count, and the difference between the second
+    and fourth is roughly twice the difference between the first and second.
+    In this case, assign the third day the count of the second plus half the
+    difference between the second and fourth.
+    :param data: A list of tuples (ord date, total cases, deaths).
+    :return: An updated list
+    """
+    # Since collections / tuples can't be updated, convert them all to
+    # lists.
+    data = [list(x) for x in data]
+
+    # Walk the list twice, once for cases, again for deaths.
+
+    for k in range(1, 3):
+        for n in range(len(data) - 3):
+            if data[n+1][k] != data[n+2][k]:
+                continue
+            else:
+                pass
+            # We have a day with zero increase.
+            previous_increase = data[n+1][k] - data[n][k]
+            following_increase = data[n+3][k] - data[n+1][k]
+            if data[n][k] > 10:
+                if following_increase > 3 and following_increase > float(previous_increase) * 1.2:
+                    smooth_value = int((following_increase - previous_increase) / 2)
+                    data[n+2][k] += smooth_value
+                    data[n+3][k] -= smooth_value
+    return data
+
+
 def main():
     parse_args()
     columns = define_columns()
@@ -616,6 +679,10 @@ def main():
 
     location_data, parent_data = get_data_from_db(focuses, worldwide,
                                                   parent_level, parent_focus)
+    if args.smooth_data:
+        location_data = smooth_data(location_data)
+        parent_data = smooth_data(parent_data)
+
     Day.set_data(location_data, parent_data)
 
     Day.compute_pcts_velocities_accelerations()
