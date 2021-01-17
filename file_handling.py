@@ -20,7 +20,7 @@ def get_files(from_dir):
             filtered.append(f)
     # The limiting expression below makes sure that if the data are available
     # we can do the smoothing of acceleration for even the first displayed day.
-    return sorted(filtered)
+    return sorted(filtered, key=filename_to_ordinal_date)
 
 
 def filename_to_ordinal_date(filename):

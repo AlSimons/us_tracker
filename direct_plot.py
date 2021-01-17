@@ -396,7 +396,7 @@ def plot_it(focus, parent_focus):
         case_type = "Active"
     else:
         case_type = "Confirmed"
-    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} {}} Cases {}".
+    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} {} Cases {}".
              format(conf_num[-1], case_type, confirmed_percentage), 'g')
     # The number will print with a minus sign if < 0, so we only need to
     # add the "+" if >= 0.
@@ -567,15 +567,19 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     :return:
     """
     location, datum, conn = get_tables_and_connection()
-    engine = get_engine()
     focus_texts = []
+    if args.active_cases:
+        case_type = 'active'
+    else:
+        case_type = 'confirmed'
+
     base_query_text = """
     SELECT 
             datum.ordinal_date AS odate, 
-            SUM(datum.confirmed) AS conf,
+            SUM(datum.{}) AS conf,
             SUM(datum.deaths) AS deaths
         FROM datum, location WHERE 
-    """
+    """.format(case_type)
 
     # Build the location's where based on the focuses
     if focuses[0] is not None:
