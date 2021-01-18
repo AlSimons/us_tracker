@@ -8,10 +8,11 @@ import pandas as pd
 def simplify_column_dates(d):
     if 'Country' in d:
         return d
+    # The year is always in 2 digits, so we don't have to format it.
     parts = d.split('/')
     month = '{:02d}'.format(int(parts[0]))
     day = '{:02d}'.format(int(parts[1]))
-    return '/'.join([month, day])
+    return '/'.join([month, day, parts[2]])
 
 
 def get_covid_data():
@@ -81,9 +82,9 @@ def find_milestones(covid_data):
                 milestone = millions * 1000000
 
 
-def to_ordinal_date(mmdd):
-    full_date = mmdd + "/2020"
-    date_template = '%m/%d/%Y'
+def to_ordinal_date(mmddyy):
+    full_date = mmddyy
+    date_template = '%m/%d/%y'
     return datetime.datetime.strptime(full_date, date_template).\
         date().toordinal()
 
