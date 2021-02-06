@@ -22,10 +22,11 @@ POPULATION_FILE = r'us_tracker\populations.csv'
 
 class ColumnInfo:
     def __init__(self, field,
-                 computed_type, depended_field):
+                 computed_type, depended_field, depended_field2 = None):
         self.field = field
         self.computed_type = computed_type
         self.depended_field = depended_field
+        self.depended_field2 = depended_field2
 
 
 class Day:
@@ -164,6 +165,27 @@ class Day:
                     prev_dep = 0
                 setattr(self, target_field, cur_dep - prev_dep)
 
+    def compute_active_today(self, healed_day):
+        for column in Day.columns:
+            if column.computed_type == 'active':
+                active_field = column.field
+                confirmed_field = column.depended_field
+                deaths_field = column.depended_field2
+                try:
+                    current_confirmed = getattr(self, confirmed_field)
+                except AttributeError:
+                    current_confirmed = 0
+                try:
+                    healed_cases = getattr(healed_day, confirmed_field)
+                except AttributeError:
+                    healed_cases = 0
+                try:
+                    deaths = getattr(self, deaths_field)
+                except AttributeError:
+                    deaths = 0
+                active = current_confirmed - (healed_cases + deaths)
+                setattr(self, active_field, active)
+
     def compute_pct(self):
         for column in Day.columns:
             if column.computed_type == 'pct':
@@ -189,6 +211,15 @@ class Day:
             today.compute_pct()
             today.compute_vel_acc(yesterday, 'vel')
             today.compute_vel_acc(yesterday, 'acc')
+
+    @staticmethod
+    def compute_active():
+        # Assume that the active cases are
+        # confirmed - deaths - confirmed 14 days ago
+        for n in range(15, len(Day.all_days)):
+            today = Day.all_days[n]
+            healed_day = Day.all_days[n-14]
+            today.compute_active_today(healed_day)
 
     @staticmethod
     def compute_rolling_average():
@@ -286,6 +317,10 @@ def get_population(focus):
 def define_columns():
     columns_defs = [
         ColumnInfo('conf_num', '', ''),
+        # The files have an "active" column which we don't use because it isn't
+        # maintained by all jurisdictions. So we create a new column,
+        # "computed_active"
+        ColumnInfo('computed_active', 'active', 'conf_num', 'deaths_num'),
         ColumnInfo('daily_conf', 'vel', 'conf_num'),
         ColumnInfo('avg_daily_conf', 'rolling_average', 'daily_conf'),
         ColumnInfo('deaths_num', '', ''),
@@ -328,7 +363,12 @@ def plot_it(focus, parent_focus):
 
     for day in Day.all_days[-args.display_days:]:
         dates.append(day.date)
-        conf_num.append(day.conf_num)
+        # For plotting, we overload the conf_num list to report active cases,
+        # instead of cumulative cases.
+        if args.active_cases:
+            conf_num.append(day.computed_active)
+        else:
+            conf_num.append(day.conf_num)
         conf_vel.append(day.daily_conf)
         conf_accel.append(day.avg_daily_conf)
         deaths.append(day.deaths_num)
@@ -380,6 +420,8 @@ def plot_it(focus, parent_focus):
         focus_for_title = focus
     else:
         focus_for_title = args.group_name
+    if args.active_cases:
+        focus_for_title += " Active"
     plt.figure(figsize=(19, 9), num='{} COVID-19 History ({} days) Pop: {:,}'.
                format(focus_for_title, len(dates), focus_population))
     plt.subplots_adjust(hspace=.27, wspace=.16,
@@ -568,10 +610,7 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     """
     location, datum, conn = get_tables_and_connection()
     focus_texts = []
-    if args.active_cases:
-        case_type = 'active'
-    else:
-        case_type = 'confirmed'
+    case_type = 'confirmed'
 
     base_query_text = """
     SELECT 
@@ -691,6 +730,8 @@ def main():
 
     Day.compute_pcts_velocities_accelerations()
     Day.compute_rolling_average()
+    if args.active_cases:
+        Day.compute_active()
 
     # Use the finest grain focus that was specified
     focus = 'Global'
