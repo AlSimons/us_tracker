@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -57,7 +58,7 @@ def simplify_column_dates(d):
         return d
     month = '{:02d}'.format(int(parts[0]))
     day = '{:02d}'.format(int(parts[1]))
-    return '/'.join([month, day])
+    return '/'.join([month, day, parts[2]])
 
 
 def get_covid_data(args):
@@ -104,7 +105,8 @@ def get_covid_data(args):
                           for x in covid_data.columns]
 
     # Get rid of data before March.  Mostly zero.
-    covid_data.drop([x for x in covid_data.columns if x < "03/01"], axis=1,
+    covid_data.drop([x for x in covid_data.columns
+                     if x < "03/01" and x[:-1] == "0"], axis=1,
                     inplace=True)
 
     # Add up all the entries for a state / territory
@@ -118,6 +120,12 @@ def get_covid_data(args):
     # to [(date, "sum"), (date, "sum").  Return to simply dates.
     covid_data.columns = [x[0] for x in covid_data.columns]
     return covid_data
+
+
+def to_ordinal_date(mmddyy):
+    date_template = '%m/%d/%y'
+    return datetime.datetime.strptime(mmddyy, date_template).\
+        date().toordinal()
 
 
 def adjust_population(covid_data):
