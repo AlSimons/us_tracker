@@ -83,9 +83,8 @@ def find_milestones(covid_data):
 
 
 def to_ordinal_date(mmddyy):
-    full_date = mmddyy
     date_template = '%m/%d/%y'
-    return datetime.datetime.strptime(full_date, date_template).\
+    return datetime.datetime.strptime(mmddyy, date_template).\
         date().toordinal()
 
 
