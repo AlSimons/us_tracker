@@ -22,7 +22,7 @@ POPULATION_FILE = r'us_tracker\populations.csv'
 
 class ColumnInfo:
     def __init__(self, field,
-                 computed_type, depended_field, depended_field2 = None):
+                 computed_type, depended_field, depended_field2=None):
         self.field = field
         self.computed_type = computed_type
         self.depended_field = depended_field
@@ -183,7 +183,20 @@ class Day:
                     deaths = getattr(self, deaths_field)
                 except AttributeError:
                     deaths = 0
-                active = current_confirmed - (healed_cases + deaths)
+                try:
+                    past_deaths = getattr(healed_day, deaths_field)
+                except AttributeError:
+                    past_deaths = 0
+                # To compute the current active cases at any point in time,
+                # first we assume that any case that existed 14 or more days
+                # ago is no longer active, and remove those cases; they have
+                # either healed or died. Then we have to remove the deaths
+                # which have occurred within the past 14 days (the deaths
+                # before then were removed by removing ALL cases older than
+                # 14 days).
+                recent_deaths = deaths - past_deaths
+                active = current_confirmed - (healed_cases + recent_deaths)
+
                 setattr(self, active_field, active)
 
     def compute_pct(self):
@@ -290,19 +303,30 @@ def parse_args():
 
 
 def get_population(focus):
-    if type(focus) == str:
-        focus = [focus]
+    # Capture a local copy of focus, in case we need to change it.
+    local_focus = focus
+    if type(local_focus) == str:
+        local_focus = [local_focus]
+    # The record keeping for NYC changed. At first it was a single entity, then
+    # they started tracking it by county (borough).  So for pulling the
+    # stats, we have to look for both the "New York City" entries, and also
+    # the entries for each borough, so it has to be a group.
+    # BUT! When computing the populations, we only want to look up NYC, without
+    # adding in all the boroughs (again).  If we do that, the computed
+    # population is greater than that for the whole state.
+    if local_focus[0] == 'New York City':
+        local_focus = ['New York City']
     population = 0
     found = set()
     with open(POPULATION_FILE) as f:
         for line in f:
             parts = line.strip().split(',')
-            if parts and parts[0] in focus:
+            if parts and parts[0] in local_focus:
                 population += int(parts[1])
                 found.add(parts[0])
     # Now report the populations we were not able to find.
     header_out = False
-    for place in focus:
+    for place in local_focus:
         if place not in found:
             if not header_out:
                 print("Population(s) not found:")
@@ -341,8 +365,9 @@ def one_plot(dates, values, focus, position, title, color):
     plt.gca().xaxis.set_major_locator(
         mdates.WeekdayLocator(byweekday=mdates.MONDAY, interval=2))
     # Format x-tick labels as 3-letter month name and day number
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'));
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
     plt.plot(dates, values, color + '-')
+    plt.grid(axis='y')
     axes = plt.gca()
     axes.set_ylim(bottom=0)
 
@@ -352,6 +377,7 @@ def plot_it(focus, parent_focus):
     conf_vel = []
     conf_num = []
     conf_accel = []
+    active_num = []
     deaths = []
     deaths_vel = []
     deaths_acc = []
@@ -365,10 +391,8 @@ def plot_it(focus, parent_focus):
         dates.append(day.date)
         # For plotting, we overload the conf_num list to report active cases,
         # instead of cumulative cases.
-        if args.active_cases:
-            conf_num.append(day.computed_active)
-        else:
-            conf_num.append(day.conf_num)
+        conf_num.append(day.conf_num)
+        active_num.append(day.computed_active)
         conf_vel.append(day.daily_conf)
         conf_accel.append(day.avg_daily_conf)
         deaths.append(day.deaths_num)
@@ -428,18 +452,26 @@ def plot_it(focus, parent_focus):
                         top=.97, bottom=.07,
                         left=.06, right=.97)
 
+    if args.active_cases:
+        cases = active_num[-1]
+        case_list = active_num
+        case_type = "Active"
+    else:
+        cases = conf_num[-1]
+        case_list = conf_num
+        case_type = "Confirmed"
+
+    # Compute the percentage of the population that is either confirmed or
+    # active.
     if focus_population > 0:
         confirmed_percentage = " {}%".\
-            format(round(100 * conf_num[-1] / focus_population, 2))
+            format(round(100 * cases / focus_population, 2))
     else:
         confirmed_percentage = ""
 
-    if args.active_cases:
-        case_type = "Active"
-    else:
-        case_type = "Confirmed"
-    one_plot(dates, conf_num, focus, conf_num_pos, "{:,} {} Cases {}".
-             format(conf_num[-1], case_type, confirmed_percentage), 'g')
+    one_plot(dates, case_list, focus, conf_num_pos, "{:,} {} Cases {}".
+             format(cases, case_type, confirmed_percentage), 'g')
+
     # The number will print with a minus sign if < 0, so we only need to
     # add the "+" if >= 0.
     sign = "+" if conf_vel[-1] > 0 else ""
@@ -468,7 +500,8 @@ def plot_it(focus, parent_focus):
                  format(round(conf_pop[-1], 2), parent_focus,
                         percent_of_parent_pop_str), 'k')
     try:
-        one_plot(dates, deaths, focus, deaths_num_pos, "{:,} Deaths Cumulative: {}%".
+        one_plot(dates, deaths, focus, deaths_num_pos,
+                 "{:,} Deaths Cumulative: {}%".
                  format(deaths[-1],
                         round((deaths[-1] /
                                conf_num[-(args.death_lag + 1)]) * 100, 1)),
@@ -477,7 +510,8 @@ def plot_it(focus, parent_focus):
         print("No data found for {}".format(focus))
         sys.exit()
     sign = "+" if deaths[-1] > deaths[-2] else ""
-    one_plot(dates, deaths_vel, focus, deaths_daily_pos, "{:,} Daily New Deaths {}{}%".
+    one_plot(dates, deaths_vel, focus, deaths_daily_pos,
+             "{:,} Daily New Deaths {}{}%".
              format(deaths_vel[-1], sign,
                     round(100 *
                           (deaths[-1] - deaths[-2]) / deaths[-2], 2)), 'b')
@@ -508,29 +542,25 @@ def plot_it(focus, parent_focus):
 
 def get_level_focus():
     focuses = [None, None, None]
-    worldwide = True
     if args.admin1:
         # Summarize a country
         if args.use_groups and args.admin1 in groups['admin1']:
             focuses[0] = groups['admin1'][args.admin1]
         else:
             focuses[0] = args.admin1
-        worldwide = False
     if args.admin2:
         # Summarize a state / province
         if args.use_groups and args.admin2 in groups['admin2']:
             focuses[1] = groups['admin2'][args.admin2]
         else:
             focuses[1] = args.admin2
-        worldwide = False
     if args.admin3:
         # Summarize a city / county
         if args.use_groups and args.admin3 in groups['admin3']:
             focuses[2] = groups['admin3'][args.admin3]
         else:
             focuses[2] = args.admin3
-        worldwide = False
-    return worldwide, focuses
+    return focuses
 
 
 def get_parent_level_focus():
@@ -569,12 +599,10 @@ def get_tables_and_connection():
     datum_table = \
         Table('datum', metadata, autoload=True,
               autoload_with=engine)
-    conn = engine.connect()
     return location_table, datum_table, eng
 
 
 def ordinal_date_to_string(ordinal, to_dt=True):
-    fo = datetime.datetime.fromordinal(ordinal).date()
     date_string = str(datetime.datetime.fromordinal(ordinal).date())
     if to_dt:
         dt = datetime.datetime.strptime(date_string, '%Y-%m-%d')
@@ -596,14 +624,13 @@ def build_focus_where_clause(field, focus):
     return clause
 
 
-def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
+def get_data_from_db(focuses, parent_level, parent_focus):
     """
     First we get a list of all the jhu_keys in the requested focus.
     Then we will get all the data for those location keys.
     :param focuses: a list of [country, admin1, admin2] describing the location
         we want to plot.  For instance, ['US', None, None], or
         [None, 'Arizona', None].
-    :param worldwide: True if we are going for global statistics.
     :param parent_level:
     :param parent_focus:
     :return:
@@ -666,8 +693,8 @@ def get_data_from_db(focuses, worldwide, parent_level, parent_focus):
     # Is is likely that the parent has more (earlier) data than the location.
     # Only get the parent data from the start of the location's data
     date_limit_text = "ordinal_date >= {} AND ".format(location_result[0][0])
-    query_text = base_query_text + where_clause + \
-                 date_limit_text + query_tail
+    query_text = \
+        base_query_text + where_clause + date_limit_text + query_tail
     parent_result = list(conn.execute(text(query_text)))
 
     return location_result, parent_result
@@ -704,8 +731,10 @@ def smooth_data(data):
             previous_increase = data[n+1][k] - data[n][k]
             following_increase = data[n+3][k] - data[n+1][k]
             if data[n][k] > 10:
-                if following_increase > 3 and following_increase > float(previous_increase) * 1.2:
-                    smooth_value = int((following_increase - previous_increase) / 2)
+                if following_increase > 3 and \
+                        following_increase > float(previous_increase) * 1.2:
+                    smooth_value = int((following_increase -
+                                        previous_increase) / 2)
                     data[n+2][k] += smooth_value
                     data[n+3][k] -= smooth_value
     return data
@@ -716,11 +745,11 @@ def main():
     columns = define_columns()
     Day.set_columns(columns)
 
-    worldwide, focuses = get_level_focus()
+    focuses = get_level_focus()
 
     parent_level, parent_focus = get_parent_level_focus()
 
-    location_data, parent_data = get_data_from_db(focuses, worldwide,
+    location_data, parent_data = get_data_from_db(focuses,
                                                   parent_level, parent_focus)
     if args.smooth_data:
         location_data = smooth_data(location_data)
