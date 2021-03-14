@@ -129,13 +129,18 @@ def fix_admin1(admin1):
             return admin2, state_abbreviations[abbreviated_admin1] + \
                 ' (' + parenthetical
 
-    # A real oddball in 3-14 and 3-15.
+    # A real oddball in 3-14 and 3-15-2020.
     if admin2 == 'Virgin Islands' and abbreviated_admin1 == 'U.S.':
         return None, admin2
 
-    # A known instance that is fine, so don't warn about it.
-    if abbreviated_admin1 != 'Sint Eustatius and Saba':
-        print("Not found:", abbreviated_admin1)
+    # Known instances that are fine, so don't warn.
+    known_non_state_fixups = [
+        'Ascension and Tristan da Cunha',
+        'Sint Eustatius and Saba',
+    ]
+
+    if abbreviated_admin1 not in known_non_state_fixups :
+        print("Not found:", admin2, "::", abbreviated_admin1)
 
     return None, admin1
 
