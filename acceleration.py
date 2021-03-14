@@ -3,6 +3,7 @@
 # million case mark
 import datetime
 import pandas as pd
+import sys
 
 
 def simplify_column_dates(d):
@@ -17,28 +18,39 @@ def simplify_column_dates(d):
 
 def get_covid_data():
     # Read in the CSV
-    file_name = \
-        r'csse_covid_19_time_series\time_series_covid19_confirmed_US.csv'
+    if len(sys.argv) > 1 and sys.argv[1] == 'global':
+        file_name = \
+            r'csse_covid_19_time_series\time_series_covid19_confirmed_global.csv'
+    else:
+        file_name = \
+            r'csse_covid_19_time_series\time_series_covid19_confirmed_US.csv'
     covid_data = pd.read_csv(file_name, index_col=6)
     # print("Initial", covid_data.shape)
 
     # Get rid of all the unneeded columns (all those not in the time series)
-    covid_data = covid_data.drop(
-        ['UID', 'iso2', 'iso3', 'code3', 'FIPS',
-         'Lat', 'Long_', 'Combined_Key', 'Admin2'], axis=1)
+    if len(sys.argv) > 1 and sys.argv[1] == 'global':
+        covid_data = covid_data.drop(['Province/State', 'Lat', 'Long',], axis=1)
+    else:
+        covid_data = covid_data.drop(
+            ['UID', 'iso2', 'iso3', 'code3', 'FIPS',
+             'Lat', 'Long_', 'Combined_Key', 'Admin2'], axis=1)
     # print("Dropped columns", covid_data.shape)
 
     # Simplify the column names
     covid_data.columns = [simplify_column_dates(x)
                           for x in covid_data.columns]
 
-    # Add up all the entries for the US
-    covid_data = covid_data.groupby('Country_Region').agg(['sum'])
+    # Add up all the entries
+    if len(sys.argv) > 1 and sys.argv[1] == 'global':
+        covid_data = covid_data.agg(['sum'])
+        covid_data = covid_data.drop(['Country/Region'], axis=1)
+    else:
+        covid_data = covid_data.groupby('Country_Region').agg(['sum'])
+        # That step changed the column headers from [date, date, ...]
+        # to [(date, "sum"), (date, "sum").  Return to simply dates.
+        covid_data.columns = [x[0] for x in covid_data.columns]
     print("After aggregation", covid_data.shape)
 
-    # That step changed the column headers from [date, date, ...]
-    # to [(date, "sum"), (date, "sum").  Return to simply dates.
-    covid_data.columns = [x[0] for x in covid_data.columns]
     return covid_data
 
 
@@ -65,21 +77,29 @@ def find_milestones(covid_data):
     milestone = milestones[milestone_n]
     for n in range(len(covid_data.columns)):
         count = covid_data.iloc[0, n]
-        if count >= milestone:
-            mmdd = covid_data.columns[n]
-            ordinal = to_ordinal_date(mmdd)
-            if previous_ordinal == 0:
-                print("{}\t{:,}".format(mmdd, count))
-            else:
-                print("{}\t{:,}\t{} days".format(mmdd, count,
-                                                 ordinal - previous_ordinal))
-            previous_ordinal = ordinal
-            if milestone < 1000000:
-                milestone_n += 1
-                milestone = milestones[milestone_n]
-            else:
-                millions += 1
-                milestone = millions * 1000000
+        try:
+            if count >= milestone:
+                mmdd = covid_data.columns[n]
+                ordinal = to_ordinal_date(mmdd)
+                if previous_ordinal == 0:
+                    print("{}\t{:,}".format(mmdd, count))
+                else:
+                    print("{}\t{:,}\t{} days".format(mmdd, count,
+                                                     ordinal - previous_ordinal))
+                previous_ordinal = ordinal
+                if milestone < 1000000:
+                    milestone_n += 1
+                    milestone = milestones[milestone_n]
+                else:
+                    millions += 1
+                    milestone = millions * 1000000
+        except TypeError:
+            # In global mode, the first column is a string of all the location
+            # names.
+            continue
+    ordinal = to_ordinal_date(covid_data.columns[-1])
+    print("Current:\t{:,}\t{} days".format(covid_data.iloc[0, -1],
+                                   ordinal - previous_ordinal))
 
 
 def to_ordinal_date(mmddyy):
