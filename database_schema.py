@@ -46,3 +46,12 @@ class LastDate(Base):
     id = Column(Integer, primary_key=True)
     ordinal_date = Column(Integer, nullable=False)
     date_string = Column(String(10))
+
+
+class Loaded(Base):
+    __tablename__ = 'loaded'
+
+    id = Column(Integer, primary_key=True)
+    filename = Column(String(14), nullable=False)
+    # The currently loaded file's mtime
+    filetime = Column(String(20), nullable=False)

@@ -23,7 +23,7 @@ groups = {"admin1": {
           "admin2": {
               "New England": [
                   "Connecticut", "Massachusetts", "Maine",
-                  "Rhode Island", "Vermont"], },
+                  "New Hampshire", "Rhode Island", "Vermont"], },
           "admin3": {
               "New York City": [
                   # Kings County is Brooklyn, New York County is Manhattan

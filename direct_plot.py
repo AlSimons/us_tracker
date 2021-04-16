@@ -276,6 +276,8 @@ def parse_args():
         help="Specify admin-3 level group (e.g., city / county)")
     parser.add_argument('-a', '--active-cases', action='store_true',
                         help="Display active cases instead of confirmed cases.")
+    parser.add_argument('-c', '--cumulative-cases', action='store_true',
+                        help="Display cumulaltive cases instead of active cases.")
     parser.add_argument('-d', '--days', type=int, default=7,
                         help="Number of days for rolling averages [7]")
     parser.add_argument('-D', '--display-days', type=int, default=365,
@@ -299,6 +301,8 @@ def parse_args():
     args = parser.parse_args()
     if args.use_groups and not args.group_name:
         parser.error("Using --use-groups requires using --group-name")
+    if not args.cumulative_cases:
+        args.active_cases = True
     return args
 
 
@@ -625,6 +629,14 @@ def build_focus_where_clause(field, focus):
 
 
 def get_data_from_db(focuses, parent_level, parent_focus):
+    # FIXME
+    # FIXME
+    # FIXME
+    # FIXME
+    # FIXME YIKES!  Not using prepared statements!
+    # FIXME
+    # FIXME
+    # FIXME
     """
     First we get a list of all the jhu_keys in the requested focus.
     Then we will get all the data for those location keys.
@@ -698,46 +710,6 @@ def get_data_from_db(focuses, parent_level, parent_focus):
     parent_result = list(conn.execute(text(query_text)))
 
     return location_result, parent_result
-
-
-def smooth_data(data):
-    """
-    Sometimes a location will miss an update; presumably it arrives at JHU too
-    late to be included in the day's report.  So the location will show zero
-    increase, but the next day will show two day's increase.  Try to smooth this
-    out by assigning half the increase to "missing" day.
-
-    Our first attempt at this is to look at four day windows, where the second
-    and third days have the same count, and the difference between the second
-    and fourth is roughly twice the difference between the first and second.
-    In this case, assign the third day the count of the second plus half the
-    difference between the second and fourth.
-    :param data: A list of tuples (ord date, total cases, deaths).
-    :return: An updated list
-    """
-    # Since collections / tuples can't be updated, convert them all to
-    # lists.
-    data = [list(x) for x in data]
-
-    # Walk the list twice, once for cases, again for deaths.
-
-    for k in range(1, 3):
-        for n in range(len(data) - 3):
-            if data[n+1][k] != data[n+2][k]:
-                continue
-            else:
-                pass
-            # We have a day with zero increase.
-            previous_increase = data[n+1][k] - data[n][k]
-            following_increase = data[n+3][k] - data[n+1][k]
-            if data[n][k] > 10:
-                if following_increase > 3 and \
-                        following_increase > float(previous_increase) * 1.2:
-                    smooth_value = int((following_increase -
-                                        previous_increase) / 2)
-                    data[n+2][k] += smooth_value
-                    data[n+3][k] -= smooth_value
-    return data
 
 
 def main():
