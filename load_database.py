@@ -492,7 +492,7 @@ def refresh_lines(session, filename):
                     stored_datum.recovered, new_datum.recovered))
                 stored_datum.recovered = new_datum.recovered
             if msg:
-                print(filename, location, msg.join("; "))
+                print(filename, location, "; ".join(msg))
                 update = text("""UPDATE datum
                                  SET active=:act,
                                      case_fatality_ratio=:cfr,
