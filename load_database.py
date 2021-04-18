@@ -457,15 +457,15 @@ def refresh_lines(session, filename):
             # comparing a record in the DB to the corresponding record in the
             # file inordinately hard.  Just doing it in straight SQL.
 
-            # Assume that this record hasn't changed.
-            needs_refresh = False
             location = get_location(session, levels, line, just_jhu_key=True)
             new_datum = LineDatum(line)
             try:
                 stored_datum = db_data[location.upper()]
             except KeyError:
                 continue
-            message = []
+
+            # Collect all the messages for this line.
+            msg = []
             if new_datum.active != stored_datum.active:
                 msg.append("Act: {} > {}".format(
                     stored_datum.active, new_datum.active))
