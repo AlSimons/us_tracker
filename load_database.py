@@ -49,7 +49,8 @@ class LineDatum(object):
         except(ValueError, KeyError):
             self.incidence_rate = 0.0
         try:
-            self.case_fatality_ratio = float(line['Case-Fatality_Ratio'])
+            self.case_fatality_ratio = round(
+                float(line['Case-Fatality_Ratio']), 5)
         except (ValueError, KeyError):
             self.case_fatality_ratio = 0.0
 
