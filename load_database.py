@@ -8,6 +8,7 @@ from database_schema import Base, Location, Datum, LastDate, Loaded
 from file_handling import get_files, filename_to_ordinal_date, \
     ordinal_date_to_string
 from state_abbreviations import state_abbreviations
+from timer import Timer
 
 # Note: NEVER put this file into git!
 from mysql_credentials import username, password
@@ -50,7 +51,7 @@ class LineDatum(object):
             self.incidence_rate = 0.0
         try:
             self.case_fatality_ratio = round(
-                float(line['Case-Fatality_Ratio']), 5)
+                float(line['Case-Fatality_Ratio']), 4)
         except (ValueError, KeyError):
             self.case_fatality_ratio = 0.0
 
@@ -549,6 +550,8 @@ def record_file_mtime(session, filename):
 
 
 def main():
+    timer = Timer().start()
+
     parse_args()
     engine = create_engine(DATABASE_NAME.format(username, password), echo=False)
     create_database(engine)
@@ -559,6 +562,9 @@ def main():
     initial_load_jhu_files(session)
 
     refresh_files(session)
+
+    timer.stop()
+    print("Entire database load took:", timer)
 
 
 if __name__ == '__main__':

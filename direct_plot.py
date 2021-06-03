@@ -298,6 +298,8 @@ def parse_args():
     parser.add_argument('-s', '--smooth-data', action='store_true',
                         help="Smooth data spikes caused by missing a day's"
                              "data")
+    parser.add_argument('-y', '--y-log', action='store_true',
+                        help="Use logarithmic scale for Y axis.")
     args = parser.parse_args()
     if args.use_groups and not args.group_name:
         parser.error("Using --use-groups requires using --group-name")
@@ -364,6 +366,22 @@ def one_plot(dates, values, focus, position, title, color):
         plt.title(focus + " " + title)
     else:
         plt.title(args.group_name + " " + title)
+
+    # For some displays, we may want to look in log scale.
+    y_bottom_lim = 0
+    if args.y_log:
+        y_bottom_lim = 99999999999
+        max = -1
+        for x in values:
+            if x > max:
+                max = x
+            if x < y_bottom_lim:
+                y_bottom_lim = x
+        if max > 2500:
+            if y_bottom_lim < 1:
+                y_bottom_lim = 1
+            plt.yscale('log');
+
     plt.xticks(rotation=90)
     # Set x-axis major ticks to weekly interval, on Mondays
     plt.gca().xaxis.set_major_locator(
@@ -373,7 +391,7 @@ def one_plot(dates, values, focus, position, title, color):
     plt.plot(dates, values, color + '-')
     plt.grid(axis='y')
     axes = plt.gca()
-    axes.set_ylim(bottom=0)
+    axes.set_ylim(bottom=y_bottom_lim)
 
 
 def plot_it(focus, parent_focus):
