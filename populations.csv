@@ -60,6 +60,7 @@ Brooklyn,2600750,County
 Calvert,89628,County
 Clark,2328320,County
 Fairfield,943457,County
+Gallatin,119938,County
 Hancock,54597,County
 Hillsborough,419427,County
 Kings,2555720,County
@@ -79,6 +80,7 @@ Richmond,477505,County
 Silver Bow,35267,County
 Staten Island, 475000, County
 Steuben,98990,County
+Yellowstone,163842,County
 Yuma,216872,County
 New York City,8336817,City
 British Columbia,5120184,Canadian Province
@@ -87,6 +89,7 @@ Albania,2877797,Country
 Andorra,77333,Country
 Argentina,45195774,Country
 Armenia,2966132,Country
+Australia,25760790, Country
 Austria,9045069,Country
 Azerbaijan,10186801,Country
 Belarus,9452123,Country
@@ -119,11 +122,14 @@ Israel,8655535,Country
 Italy,60462246,Country
 Japan,126330538,Country
 Kazakhstan,18880896,Country
+"Korea South",51269185,Country
 Kosovo,1798506,Country
+Laos,7384443,Country
 Latvia,1876751,Country
 Liechtenstein,38172,Country
 Lithuania,2702373,Country
 Luxembourg,632174,Country
+Malaysia,32747402,Country
 Malta,514564,Country
 Mexico,128951496, Country
 Moldova,4031141,Country
@@ -139,15 +145,18 @@ Romania,19168101,Country
 Russia,145934462,Country
 San Marino,33965,Country
 Serbia,8729686,Country
+Singapore,5896362,Country
 Slovakia,5462617,Country
 Slovenia,2079798,Country
 South Africa,59308690,Country
 Spain,46755909, Country
 Sweden,10099265,Country
 Switzerland,684273,Country
+Thailand,69799978,Country
 Turkey,84979214,Country
 Ukraine,43642532,Country
 United Kingdom,67881190,Country
 Vatican City,796,Country
 Venezuela,28435940,Country
+Vietnam,98168833,Country
 Global,7794195599,Global

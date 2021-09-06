@@ -486,8 +486,13 @@ def plot_it(focus, parent_focus):
     # Compute the percentage of the population that is either confirmed or
     # active.
     if focus_population > 0:
-        confirmed_percentage = " {}%".\
-            format(round(100 * cases / focus_population, 2))
+        if not args.active_cases:
+            confirmed_percentage = " {}%".\
+                format(round(100 * cases / focus_population, 2))
+        else:
+            # Active cases
+            confirmed_percentage = "(1/{})".\
+                format(round(focus_population / cases, 0))
     else:
         confirmed_percentage = ""
 
