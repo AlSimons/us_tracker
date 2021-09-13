@@ -5,3 +5,4 @@ __pycache__
 *.db-journal
 mysql_credentials.py
 updated_files.txt
+*ipynb*
