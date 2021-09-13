@@ -537,11 +537,14 @@ def plot_it(focus, parent_focus):
         print("No data found for {}".format(focus))
         sys.exit()
     sign = "+" if deaths[-1] > deaths[-2] else ""
-    one_plot(dates, deaths_vel, focus, deaths_daily_pos,
-             "{:,} Daily New Deaths {}{}%".
-             format(deaths_vel[-1], sign,
-                    round(100 *
-                          (deaths[-1] - deaths[-2]) / deaths[-2], 2)), 'b')
+    try:
+        one_plot(dates, deaths_vel, focus, deaths_daily_pos,
+                 "{:,} Daily New Deaths {}{}%".
+                 format(deaths_vel[-1], sign,
+                        round(100 *
+                              (deaths[-1] - deaths[-2]) / deaths[-2], 2)), 'b')
+    except decimal.InvalidOperation:
+        pass  # Just don't draw the plot if no death info.
     try:
         deaths_inc_pct_sign = "+" if deaths_acc[-1] > deaths_acc[-2] else ""
         deaths_inc_pct_str = "{}{}%".format(

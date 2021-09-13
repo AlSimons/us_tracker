@@ -5,8 +5,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.sql import text
 from database_schema import Base, Location, Datum, LastDate, Loaded
-from file_handling import get_files, filename_to_ordinal_date, \
-    ordinal_date_to_string
+from date_handling import filename_to_ordinal_date, \
+    ordinal_date_to_string, bc_date_to_ordinal_date
+from file_handling import get_files
+from load_bc_regional_data import load_bc_data
 from state_abbreviations import state_abbreviations
 from timer import Timer
 
@@ -16,7 +18,9 @@ from mysql_credentials import username, password
 import argparse
 import csv
 from datetime import datetime
+import io
 import os
+import requests
 import sys
 
 
@@ -349,7 +353,8 @@ def initial_load_jhu_files(session):
     # Get the files to process
     files = get_files(JHU_DATA_DIRECTORY)
 
-    # Get the last date already processed.  Don't want to re-do any data.
+    # Get the last date already processed from the JHU data files.  Don't want
+    # to re-do any data.
     try:
         last_ordinal_date_processed = session.query(LastDate).one().ordinal_date
     except NoResultFound:
@@ -550,8 +555,7 @@ def record_file_mtime(session, filename):
 
 
 def main():
-    timer = Timer().start()
-
+    overall_timer = Timer().start()
     parse_args()
     engine = create_engine(DATABASE_NAME.format(username, password), echo=False)
     create_database(engine)
@@ -559,12 +563,22 @@ def main():
     Session = sessionmaker(bind=engine)
     session = Session()
 
+    main_load_timer = Timer().start()
     initial_load_jhu_files(session)
-
+    main_load_timer.stop()
+    refresh_timer = Timer().start()
     refresh_files(session)
+    refresh_timer.stop()
 
-    timer.stop()
-    print("Entire database load took:", timer)
+    # And the BC regional data
+    bc_load_timer = Timer().start()
+    load_bc_data(session)
+    bc_load_timer.stop()
+    overall_timer.stop()
+    print("Main load took:", main_load_timer)
+    print("Updated file refresh took:", refresh_timer)
+    print("BC regional data refresh took:", bc_load_timer)
+    print("Entire database load took:", overall_timer)
 
 
 if __name__ == '__main__':
