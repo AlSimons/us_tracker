@@ -695,6 +695,15 @@ def get_data_from_db(focuses, parent_level, parent_focus):
     if focuses[2] is not None:
         focus_where = build_focus_where_clause('admin2', focuses[2])
         focus_texts.append(focus_where)
+    else:
+        # SPECIAL CASE:
+        # We're getting British Columbia data from two sources. If we
+        # Just specify "British Columbia" with no admin2, we want the
+        # data from JHU. Otherwise, we want the data from BC DHS.
+        # The difference is that the data from JHU has no admin2 in the
+        # location record.
+        if focuses[1] == "British Columbia":
+            focus_texts.append('admin2 is null')
 
     if focus_texts:
         where_clause = ' AND '.join(focus_texts) + ' AND '
