@@ -141,6 +141,6 @@ def get_bc_location_record(session, hsda):
     location.jhu_key = jhu_key
     session.add(location)
     #
-    # Note: no commit().  We only commit after completing a daily report file.
+    # Note: no commit().  We only commit after loading the entire CSV.
     #
     return location
