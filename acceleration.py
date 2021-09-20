@@ -98,8 +98,9 @@ def find_milestones(covid_data):
             # names.
             continue
     ordinal = to_ordinal_date(covid_data.columns[-1])
-    print("Current:\t{:,}\t{} days".format(covid_data.iloc[0, -1],
-                                   ordinal - previous_ordinal))
+    if ordinal != previous_ordinal:
+        print("Current:\t{:,}\t{} days".format(covid_data.iloc[0, -1],
+                                       ordinal - previous_ordinal))
 
 
 def to_ordinal_date(mmddyy):
