@@ -563,17 +563,21 @@ def main():
     Session = sessionmaker(bind=engine)
     session = Session()
 
+    # Load the main data set from JHU
     main_load_timer = Timer().start()
     initial_load_jhu_files(session)
     main_load_timer.stop()
-    refresh_timer = Timer().start()
-    refresh_files(session)
-    refresh_timer.stop()
 
     # And the BC regional data
     bc_load_timer = Timer().start()
     load_bc_data(session)
     bc_load_timer.stop()
+
+    # Refresh the data from updated files.
+    refresh_timer = Timer().start()
+    refresh_files(session)
+    refresh_timer.stop()
+
     overall_timer.stop()
     print("Main load took:", main_load_timer)
     print("Updated file refresh took:", refresh_timer)
