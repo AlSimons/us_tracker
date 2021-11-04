@@ -1,5 +1,6 @@
 """
-Copied from: https://realpython.com/python-timer/ with very slight mods.
+Copied from: https://realpython.com/python-timer/ with reworked return
+string formatting.
 """
 import time
 
@@ -39,10 +40,10 @@ class Timer:
         minutes = 0
         if seconds >= 3600:
             hours = int(seconds / 3600)
-            seconds = seconds - (hours * 3600)
+            seconds = seconds % 3600
         if seconds >= 60:
             minutes = int(seconds / 60)
-            seconds = seconds - (minutes * 60)
+            seconds = seconds % 60
         if hours == 1:
             hours_label = "hour"
         else:

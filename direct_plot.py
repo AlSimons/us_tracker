@@ -702,7 +702,8 @@ def get_data_from_db(focuses, parent_level, parent_focus):
         # data from JHU. Otherwise, we want the data from BC DHS.
         # The difference is that the data from JHU has no admin2 in the
         # location record.
-        if focuses[1] == "British Columbia":
+        if focuses[1] == "British Columbia" or \
+                focuses[0] == "Canada":
             focus_texts.append('admin2 is null')
 
     if focus_texts:
